@@ -1307,36 +1307,105 @@ ui.settingsBtn.addEventListener("click", () => ui.settings.showModal());
 ui.saveKey.addEventListener("click", () => { saveSettings(); toast("Settings saved"); if (scene) maybeFetchBio(scene); });
 ui.clearKey.addEventListener("click", () => { ui.apiKey.value = ""; saveSettings(); toast("Key cleared"); });
 
-/* Voice input: speak your sentence (Web Speech API, Chrome / Edge / Safari) */
+/* Voice input: speak your sentence (Web Speech API: Chrome, Edge, Safari)
+   Shows clear status and fixes for every failure case instead of failing
+   silently. Wispr Flow dictation into the text box is always the fallback. */
 (function setupVoice() {
-  const btn = $("micBtn");
+  const btn = $("micBtn"), status = $("voiceStatus");
+  if (!btn) return;
+  btn.classList.remove("hidden"); // always visible so it can explain itself
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR || !btn) return;
-  btn.classList.remove("hidden");
-  let rec = null, listening = false;
-  const stop = () => { listening = false; btn.classList.remove("listening"); btn.setAttribute("aria-pressed", "false"); };
+  const TIP = " You can also click the text box and dictate with Wispr Flow.";
+  let hideTimer = null;
+  const say = (msg, kind = "", ms = 0) => {
+    if (!status) { toast(msg); return; }
+    clearTimeout(hideTimer);
+    status.textContent = msg;
+    status.className = "voice-status" + (kind ? " " + kind : "");
+    status.hidden = !msg;
+    if (ms) hideTimer = setTimeout(() => { status.hidden = true; }, ms);
+  };
+
+  if (!SR) {
+    btn.addEventListener("click", () =>
+      say("This browser has no built-in speech-to-text (Firefox doesn't support it). Open Pixel Soul in Chrome, Edge or Safari." + TIP, "warn"));
+    return;
+  }
+
+  const ERRORS = {
+    "not-allowed": "Microphone is blocked for this page. Click the icon left of the address bar, set Microphone to Allow, then reload and try again.",
+    "service-not-allowed": "The browser refused speech recognition here. Open the live https link (GitHub Pages) in Chrome or Edge, not the file directly from your computer.",
+    "audio-capture": "No microphone was found. Check that one is plugged in, and in Windows go to Settings > Privacy & security > Microphone and allow your browser.",
+    "network": "Couldn't reach the speech service. Chrome and Edge need internet for this, and Brave blocks it. Try Chrome or Edge on a normal connection.",
+    "no-speech": "I didn't hear anything. Tap the mic and start speaking right away, a little closer to the microphone.",
+    "language-not-supported": "Your browser's language isn't supported for speech. Switching to English, tap the mic again.",
+  };
+  const lang = /^en/i.test(navigator.language || "") ? navigator.language : "en-US";
+  let rec = null, listening = false, langOverride = null;
+
+  const setListening = (on) => {
+    listening = on;
+    btn.classList.toggle("listening", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.title = on ? "Stop listening" : "Speak your sentence";
+  };
+
   btn.addEventListener("click", () => {
     if (listening && rec) { rec.stop(); return; }
+    if (navigator.brave) say("Heads up: Brave usually blocks browser speech recognition. Chrome or Edge work best." + TIP, "warn", 6000);
+
     rec = new SR();
-    rec.lang = navigator.language || "en-IN";
+    rec.lang = langOverride || lang;
     rec.interimResults = true;
+    rec.continuous = false;
     rec.maxAlternatives = 1;
-    let finalText = "";
-    rec.onresult = (e) => {
-      let interim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
-        else interim += e.results[i][0].transcript;
-      }
-      ui.sentence.value = (finalText + interim).trim();
+
+    let finalText = "", interimText = "", errored = false, heardAudio = false;
+    const before = ui.sentence.value;
+    let silenceTimer = null, hardStop = null;
+
+    rec.onstart = () => {
+      setListening(true);
+      say("Listening… say your sentence, then pause.", "live");
+      silenceTimer = setTimeout(() => {
+        if (!heardAudio) say("Still waiting for sound from your mic. Check that the right microphone is selected and not muted.", "warn");
+      }, 3500);
+      hardStop = setTimeout(() => { try { rec.stop(); } catch (e) { /* already stopped */ } }, 15000);
     };
-    rec.onerror = (e) => { stop(); if (e.error === "not-allowed") toast("Microphone access was blocked"); };
-    rec.onend = () => { stop(); if (finalText.trim()) generate(); };
-    listening = true;
-    btn.classList.add("listening");
-    btn.setAttribute("aria-pressed", "true");
-    toast("Listening… say your sentence");
-    try { rec.start(); } catch (e) { stop(); }
+    rec.onaudiostart = () => { heardAudio = true; };
+    rec.onspeechstart = () => { heardAudio = true; say("Hearing you…", "live"); };
+    rec.onresult = (e) => {
+      heardAudio = true;
+      interimText = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const txt = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += txt; else interimText += txt;
+      }
+      const live = (finalText + interimText).trim();
+      if (live) { ui.sentence.value = live; say("Hearing: “" + live + "”", "live"); }
+    };
+    rec.onerror = (e) => {
+      if (e.error === "aborted") return;
+      errored = true;
+      if (e.error === "language-not-supported") langOverride = "en-US";
+      say((ERRORS[e.error] || "Voice input stopped (" + e.error + ").") + TIP, "warn");
+    };
+    rec.onend = () => {
+      clearTimeout(silenceTimer); clearTimeout(hardStop);
+      setListening(false);
+      const text = (finalText || interimText).trim(); // keep words even if never "final"
+      if (text) {
+        ui.sentence.value = text;
+        say("Heard: “" + text + "”", "ok", 4000);
+        generate();
+      } else {
+        ui.sentence.value = before;
+        if (!errored) say(ERRORS["no-speech"] + TIP, "warn");
+      }
+    };
+
+    try { rec.start(); }
+    catch (err) { setListening(false); say("Couldn't start the microphone. Reload the page and try again." + TIP, "warn"); }
   });
 })();
 

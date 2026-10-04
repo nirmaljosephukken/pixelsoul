@@ -145,6 +145,23 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
 .mic-btn.listening { background: var(--wine); border-color: var(--wine); color: var(--cream); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(127, 28, 52, .18); } }
 
+/* ----- voice status line ----- */
+.voice-status {
+  max-width: 720px;
+  margin: 12px auto 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 15px;
+  text-align: left;
+  border: 1px solid var(--hair);
+  background: var(--paper);
+  color: var(--ink-70);
+}
+.voice-status[hidden] { display: none; }
+.voice-status.live { border-color: var(--wine); color: var(--wine); }
+.voice-status.ok { border-color: var(--fathom); color: var(--fathom); }
+.voice-status.warn { border-color: var(--glow); background: #fff4e3; color: var(--ink); }
+
 /* ----- buttons ----- */
 .btn {
   height: 48px;
