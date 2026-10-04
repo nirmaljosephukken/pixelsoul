@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pixelso · Say a sentence, meet your pixel soul</title>
+  <title>Pixel Soul · Say a sentence, meet your pixel soul</title>
   <meta name="description" content="Speak or type one sentence and get a one-of-a-kind seeded pixel art profile picture. Built by voice with Wispr Flow for Hacker House Goa 2026." />
   <meta name="theme-color" content="#ffffeb" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -26,9 +26,9 @@
 </head>
 <body>
   <header class="nav">
-    <a class="brand" href="./" aria-label="Pixelso home">
+    <a class="brand" href="./" aria-label="Pixel Soul home">
       <span class="brand-mark" aria-hidden="true"></span>
-      <span class="brand-word">Pixelso</span>
+      <span class="brand-word">Pixel Soul</span>
     </a>
     <div class="nav-right">
       <span class="pill pill-ghost">HH Goa ’26 × Wispr Flow</span>
@@ -42,7 +42,7 @@
     <section class="hero">
       <span class="pill pill-lav">Task 05 · Hacker House Goa × Wispr Flow</span>
       <h1>Say a sentence.<br /><em>Meet your pixel soul.</em></h1>
-      <p class="lede">Speak or type how you feel. Pixelso hashes your words and the moment you said them into a seed, then paints a one-of-a-kind pixel character you can wear as your profile picture.</p>
+      <p class="lede">Speak or type how you feel. Name a place, an animal, a colour or a vibe, and Pixel Soul paints it into a one-of-a-kind pixel character you can wear as your profile picture.</p>
 
       <div class="composer">
         <input id="sentence" type="text" maxlength="200" autocomplete="off"
@@ -69,6 +69,7 @@
           <div id="themeName" class="eyebrow">&nbsp;</div>
           <h2 id="charName" class="char-name">Your pixel soul awaits</h2>
           <p id="bio" class="bio hidden"></p>
+          <div id="wordsUsed" class="words-used" aria-live="polite"></div>
         </div>
         <div class="seed-box" title="This code is the whole seed">
           <span class="seed-label">Seed</span>
@@ -122,17 +123,17 @@
       <div class="how-item">
         <span class="how-num">01</span>
         <h4>Speak it</h4>
-        <p>Your sentence plus the exact millisecond becomes a MurmurHash seed.</p>
+        <p>Your sentence plus the exact millisecond you said it becomes a unique seed.</p>
       </div>
       <div class="how-item">
         <span class="how-num">02</span>
-        <h4>Feel it</h4>
-        <p>Sentiment nudges the odds: happy words lean sunny, sad words lean rainy.</p>
+        <h4>Shape it</h4>
+        <p>Your words steer it: “beach” means Goa, “cat” means a cat, “red” paints it red, and your mood sets the face.</p>
       </div>
       <div class="how-item">
         <span class="how-num">03</span>
         <h4>Wear it</h4>
-        <p>Download a crisp 1080 px PNG or share a link that redraws the exact same soul.</p>
+        <p>Download a crisp 1080 px, 64 × 64 pixel art PNG or share a link that redraws the exact same soul.</p>
       </div>
     </section>
   </main>

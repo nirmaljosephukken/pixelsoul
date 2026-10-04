@@ -1,5 +1,5 @@
 /* =====================================================================
-   Pixelso · Wispr Flow-inspired editorial look with Goa touches
+   Pixel Soul · Wispr Flow-inspired editorial look with Goa touches
    Warm paper canvas, serif display, lavender actions, one deep
    "fathom green" studio panel where the pixel art lives.
    ===================================================================== */
@@ -175,6 +175,20 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
   cursor: pointer;
 }
 .chip:hover { background: var(--lav); border-color: var(--lav); color: var(--ink); }
+
+/* ----- how your words shaped it ----- */
+.words-used { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+.words-used:empty { display: none; }
+.words-title { width: 100%; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: rgba(255, 255, 235, .6); }
+.word-chip {
+  padding: 5px 12px;
+  border-radius: 9999px;
+  border: 1px solid var(--fathom-line);
+  background: rgba(255, 255, 235, .06);
+  font-size: 14px;
+  color: rgba(255, 255, 235, .85);
+}
+.word-chip b { font-weight: 600; color: var(--lav); }
 
 /* ----- studio: the one dark panel ----- */
 .studio {

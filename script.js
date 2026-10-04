@@ -1,14 +1,15 @@
 /* =====================================================================
-   PIXELSO · sentence -> seeded pixel soul
+   PIXEL SOUL · sentence -> seeded pixel soul
    Every random choice comes from ONE seeded generator (see makeRng).
    No Math.random() anywhere, so a seed + sentence always redraws the
    exact same avatar.
    ===================================================================== */
 "use strict";
 
-const GRID = 32;          // art pixels per side
-const CELL = 20;          // screen pixels per art pixel (32 * 20 = 640)
-const SIZE = GRID * CELL; // 640
+const GRID = 32;          // layout units per side (theme painters think in these)
+const S = 2;              // fine pixels per layout unit
+const FINE = GRID * S;    // 64: real art resolution (64 x 64 pixel art)
+const SIZE = 640;         // on-screen canvas: 10 screen px per art pixel
 const EXPORT_SIZE = 1080;
 const GALLERY_KEY = "pixelso.gallery.v1";
 const SETTINGS_KEY = "pixelso.settings.v1";
@@ -101,34 +102,56 @@ const lum = (c) => { const [r, g, b] = rgb(c); return (0.299 * r + 0.587 * g + 0
 const mod = (a, n) => ((a % n) + n) % n;
 const BAYER = [0, 0.5, 0.75, 0.25]; // 2x2 ordered dither
 
-function newBuf() { return new Int32Array(GRID * GRID); }
-function setPx(buf, x, y, c) {
-  x = Math.round(x); y = Math.round(y);
-  if (x >= 0 && y >= 0 && x < GRID && y < GRID) buf[y * GRID + x] = c;
+// Buffers are FINE x FINE (64 x 64). Painters use layout units (0..32):
+//   setPx / rectPx / blendPx  -> a full layout unit (2 x 2 fine pixels)
+//   dotPx / dotBlend          -> a single fine pixel for small details
+//   discPx / gradient         -> computed at fine resolution (smooth)
+function newBuf() { return new Int32Array(FINE * FINE); }
+function fineSet(buf, fx, fy, c) {
+  if (fx >= 0 && fy >= 0 && fx < FINE && fy < FINE) buf[fy * FINE + fx] = c;
 }
-function getPx(buf, x, y) { return buf[y * GRID + x]; }
+function fineBlend(buf, fx, fy, c, a) {
+  if (fx >= 0 && fy >= 0 && fx < FINE && fy < FINE) buf[fy * FINE + fx] = mix(buf[fy * FINE + fx], c, a);
+}
+function setPx(buf, x, y, c) {
+  const fx = Math.round(x * S), fy = Math.round(y * S);
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) fineSet(buf, fx + i, fy + j, c);
+}
 function blendPx(buf, x, y, c, a) {
-  x = Math.round(x); y = Math.round(y);
-  if (x >= 0 && y >= 0 && x < GRID && y < GRID) buf[y * GRID + x] = mix(buf[y * GRID + x], c, a);
+  const fx = Math.round(x * S), fy = Math.round(y * S);
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) fineBlend(buf, fx + i, fy + j, c, a);
+}
+function dotPx(buf, x, y, c) { fineSet(buf, Math.round(x * S), Math.round(y * S), c); }
+function dotBlend(buf, x, y, c, a) { fineBlend(buf, Math.round(x * S), Math.round(y * S), c, a); }
+function getPx(buf, x, y) {
+  const fx = Math.min(FINE - 1, Math.max(0, Math.round(x * S)));
+  const fy = Math.min(FINE - 1, Math.max(0, Math.round(y * S)));
+  return buf[fy * FINE + fx];
 }
 function rectPx(buf, x, y, w, h, c) {
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) setPx(buf, x + i, y + j, c);
+  const x0 = Math.round(x * S), y0 = Math.round(y * S), x1 = Math.round((x + w) * S), y1 = Math.round((y + h) * S);
+  for (let fy = y0; fy < y1; fy++) for (let fx = x0; fx < x1; fx++) fineSet(buf, fx, fy, c);
 }
 function discPx(buf, cx, cy, r, c) {
-  for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++)
-    if (x * x + y * y <= r * r + r * 0.6) setPx(buf, cx + x, cy + y, c);
+  const fcx = (cx + 0.5) * S, fcy = (cy + 0.5) * S, fr = (r + 0.4) * S;
+  for (let fy = Math.floor(fcy - fr); fy <= Math.ceil(fcy + fr); fy++)
+    for (let fx = Math.floor(fcx - fr); fx <= Math.ceil(fcx + fr); fx++) {
+      const dx = fx + 0.5 - fcx, dy = fy + 0.5 - fcy;
+      if (dx * dx + dy * dy <= fr * fr) fineSet(buf, fx, fy, c);
+    }
 }
-// stepped vertical gradient with ordered dithering between bands
+// smooth vertical gradient (fine rows) with ordered dithering between bands
 function gradient(buf, colors, y0 = 0, y1 = GRID - 1) {
   const cols = colors.map(hex);
-  for (let y = y0; y <= y1; y++) {
-    const f = ((y - y0) / Math.max(1, y1 - y0)) * (cols.length - 1);
+  const f0 = y0 * S, f1 = (y1 + 1) * S - 1;
+  for (let fy = f0; fy <= f1; fy++) {
+    const f = ((fy - f0) / Math.max(1, f1 - f0)) * (cols.length - 1);
     const i = Math.min(cols.length - 2, Math.floor(f));
     const frac = f - i;
-    for (let x = 0; x < GRID; x++) {
-      const b = BAYER[(y % 2) * 2 + (x % 2)];
+    for (let fx = 0; fx < FINE; fx++) {
+      const b = BAYER[(fy % 2) * 2 + (fx % 2)];
       // dither only around the middle of each band so the sky stays calm
-      buf[y * GRID + x] = frac > 0.5 + (b - 0.375) * 0.6 ? cols[i + 1] : cols[i];
+      buf[fy * FINE + fx] = frac > 0.5 + (b - 0.375) * 0.6 ? cols[i + 1] : cols[i];
     }
   }
 }
@@ -148,14 +171,15 @@ const THEMES = [
     bg(R) {
       const b = newBuf();
       gradient(b, ["#120824", "#1e0f38", "#2c174f", "#3d2068", "#4a2878"]);
-      for (let i = 0; i < 12; i++) setPx(b, R.int(GRID), R.int(16), hex(R.pick(["#b9a6e8", "#8f7cc4"])));
+      for (let i = 0; i < 12; i++) dotPx(b, R.int(GRID), R.int(16), hex(R.pick(["#b9a6e8", "#8f7cc4"])));
       const mx = R.pick([5, 6, 25, 26]), my = 5 + R.int(2);
       for (let y = -6; y <= 6; y++) for (let x = -6; x <= 6; x++) {
         const d = Math.sqrt(x * x + y * y);
         if (d > 4.3 && d < 6.2) blendPx(b, mx + x, my + y, hex("#cbb8ff"), 0.18);
       }
       discPx(b, mx, my, 4, hex("#f6f1c7"));
-      [[-1, -1], [1, 1], [2, -2], [-2, 2]].forEach(([dx, dy]) => setPx(b, mx + dx, my + dy, hex("#d9d2a0")));
+      [[-2, -1.5], [-1.5, -1], [1, 1.5], [1.5, 1.5], [1, 2], [2.5, -1], [-1, 2.5]].forEach(([dx, dy]) => dotPx(b, mx + dx, my + dy, hex("#ddd5a3")));
+      for (let k = 0; k < 4; k++) dotPx(b, mx - 3.5 + k * 0.5, my + 3 - k * 0.5 - 1.5, hex("#fffbe0")); // rim shine
       const ph = R.next() * 6;
       for (let x = 0; x < GRID; x++) {
         const h = 26 + Math.round(Math.sin(x * 0.33 + ph) * 1.5);
@@ -267,7 +291,7 @@ const THEMES = [
       const b = newBuf();
       gradient(b, ["#04020c", "#0a0620", "#140b33", "#22104c"], 0, 21);
       rectPx(b, 0, 22, GRID, 10, hex("#0b0418"));
-      for (let i = 0; i < 14; i++) setPx(b, R.int(GRID), R.int(20), hex("#4a4a7a"));
+      for (let i = 0; i < 14; i++) dotPx(b, R.int(GRID), R.int(20), hex("#6a6a9a"));
       const pals = [["#ff7b54", "#c94f2d"], ["#5ad1ff", "#2a7fb8"], ["#c77dff", "#7b2cbf"], ["#7cf7a8", "#2f9e6a"]];
       const big = R.pick(pals), px = sideX(R, 3), py = 5 + R.int(6), pr = 3 + R.int(2);
       discPx(b, px, py, pr, hex(big[1]));
@@ -489,36 +513,112 @@ const sentimentReady = new Promise((resolve) => {
   setTimeout(done, 5000); // never block forever
 });
 
+// casual words the AFINN list scores oddly (or not at all)
+const MOOD_EXTRAS = {
+  chilling: 2, chill: 2, chilled: 2, vibe: 1, vibes: 2, vibing: 2, susegad: 3, beach: 1, sunset: 1, cozy: 2,
+  lit: 2, dope: 2, fire: 0, sick: 0, killing: 0, slay: 2, slaying: 2, homesick: -2, rainy: -1, monday: -1,
+};
 const FALLBACK_LEXICON = {
   love: 3, happy: 3, joy: 3, sunny: 2, great: 3, fun: 2, awesome: 3, cute: 2, sweet: 2, yay: 3, smile: 2,
   sad: -2, cry: -2, alone: -2, miss: -2, rain: -1, dark: -1, haunted: -2, scared: -2, hate: -3, tired: -2, lonely: -2, gloomy: -2,
 };
 function analyzeMood(sentence) {
   const text = (sentence || "").trim();
-  let score = 0, comparative = 0;
+  let score = 0, comparative = 0, positive = [], negative = [];
   if (text) {
     if (sentimentEngine) {
-      const r = sentimentEngine.analyze(text);
+      const r = sentimentEngine.analyze(text, { extras: MOOD_EXTRAS });
       score = r.score; comparative = r.comparative;
+      positive = r.positive || []; negative = r.negative || [];
     } else {
       const words = text.toLowerCase().match(/[a-z']+/g) || [];
-      words.forEach((w) => { score += FALLBACK_LEXICON[w] || 0; });
+      words.forEach((w) => {
+        const v = FALLBACK_LEXICON[w] || 0;
+        score += v;
+        if (v > 0) positive.push(w); else if (v < 0) negative.push(w);
+      });
       comparative = words.length ? score / words.length : 0;
     }
   }
   const label = score > 0 ? "positive" : score < 0 ? "negative" : "neutral";
-  return { score, comparative, label };
+  return { score, comparative, label, positive: [...new Set(positive)], negative: [...new Set(negative)] };
 }
 
-function pickTheme(R, mood) {
+/* ---------------------------------------------------------------------
+   4b. Keywords: the actual words you use steer the avatar.
+   Matches boost the odds very strongly (the seed still makes the final
+   pick, so everything stays reproducible).
+   --------------------------------------------------------------------- */
+const KEYWORDS = {
+  theme: {
+    haunted: "haunted haunt spooky halloween midnight moon bat bats grave witch creepy castle scary horror ghostly night",
+    happy: "sunny sun flower flowers garden meadow picnic spring bloom daisy smile morning sunshine",
+    sad: "rain rainy storm stormy gloomy grey gray cry crying tears lonely monday miss",
+    scifi: "space star stars planet planets galaxy rocket cosmic astronaut orbit universe nasa",
+    cyberpunk: "neon city cyber cyberpunk hacker hackers hack hacking code coding glitch 3am street streets synth arcade",
+    hydro: "ocean sea deep wave waves abyss water whale shark dive diving",
+    forest: "reef coral kelp fish lagoon aquarium mermaid turtle snorkel snorkeling",
+    candy: "candy cake sweet sweets sugar birthday sprinkle sprinkles chocolate dessert icecream lollipop donut party",
+    goa: "goa goan beach sunset baga calangute anjuna palm coconut susegad feni vacation holiday sand",
+  },
+  type: {
+    cat: "cat cats kitty kitten meow", fox: "fox foxy", owl: "owl owls wise study studying",
+    frog: "frog toad pond", bunny: "bunny rabbit bun hop easter", ghost: "ghost ghosts boo spirit phantom",
+    robot: "robot robots ai bot bots tech machine computer android code coding",
+    slime: "slime goo blob jelly", alien: "alien aliens ufo martian", dragon: "dragon dragons fire flame dino",
+    monster: "monster monsters beast rawr", vamp: "vampire vamp dracula blood fangs",
+  },
+  color: {
+    red: "#ff4d4d", orange: "#ff9f43", yellow: "#ffd93d", green: "#6bdc6b", blue: "#4da3ff", purple: "#a06bff",
+    violet: "#a06bff", pink: "#ff7eb6", white: "#f2f2f2", black: "#4a4a5a", brown: "#b07a4a", gold: "#ffcc33",
+    golden: "#ffcc33", silver: "#c9ced6", teal: "#2ec4b6", cyan: "#3ee6ff", lavender: "#d9b8ff", mint: "#98f5c9",
+  },
+  accessory: {
+    crown: "crown king queen royal prince princess", hat: "hat fancy gentleman magic magician classy",
+    headphones: "music song songs dj headphones beats vibe vibes dance dancing",
+    glasses: "glasses nerd nerdy exam exams read reading book books smart geek",
+    scarf: "scarf winter cold snow cozy chilly",
+  },
+};
+const KEYWORD_INDEX = (() => { // word -> [{kind, key}]
+  const idx = {};
+  ["theme", "type", "accessory"].forEach((kind) => Object.entries(KEYWORDS[kind]).forEach(([key, list]) =>
+    list.split(" ").forEach((w) => (idx[w] = idx[w] || []).push({ kind, key }))));
+  Object.keys(KEYWORDS.color).forEach((w) => (idx[w] = idx[w] || []).push({ kind: "color", key: w }));
+  return idx;
+})();
+
+function analyzeWords(sentence) {
+  const hints = { theme: {}, type: {}, accessory: {}, count: { theme: {}, type: {}, accessory: {} }, color: null, colorWord: null };
+  const words = (sentence || "").toLowerCase().match(/[a-z0-9']+/g) || [];
+  words.forEach((raw) => {
+    const w = KEYWORD_INDEX[raw] ? raw : KEYWORD_INDEX[raw.replace(/'s$|s$/, "")] ? raw.replace(/'s$|s$/, "") : null;
+    if (!w) return;
+    KEYWORD_INDEX[w].forEach(({ kind, key }) => {
+      if (kind === "color") { if (!hints.color) { hints.color = hex(KEYWORDS.color[key]); hints.colorWord = raw; } }
+      else {
+        if (!hints[kind][key]) hints[kind][key] = raw;
+        hints.count[kind][key] = (hints.count[kind][key] || 0) + 1;
+      }
+    });
+  });
+  return hints;
+}
+
+function pickTheme(R, mood, hints) {
   const strength = mood.label === "neutral" ? 0 : Math.min(1, 0.45 + Math.abs(mood.comparative) * 1.5);
   const weights = THEMES.map((t) => {
-    if (mood.label === "neutral") return 1;
-    if (t.mood === mood.label) return 1 + 5 * strength;      // lean toward matching mood
-    if (t.mood === "neutral") return 1;
-    return Math.max(0.25, 1 - strength);                      // lean away from opposite mood
+    let w = 1;
+    if (mood.label !== "neutral") {
+      if (t.mood === mood.label) w = 1 + 5 * strength;              // lean toward matching mood
+      else if (t.mood !== "neutral") w = Math.max(0.25, 1 - strength); // lean away from opposite mood
+    }
+    return w;
   });
-  return R.weighted(THEMES, weights);
+  // your words win: if any theme word matched, only matched themes can be picked
+  const matched = THEMES.map((t) => hints.count.theme[t.key] || 0);
+  const anyMatch = matched.some((m) => m > 0);
+  return R.weighted(THEMES, anyMatch ? weights.map((w, i) => w * matched[i]) : weights);
 }
 
 /* ---------------------------------------------------------------------
@@ -577,20 +677,24 @@ const TYPES = [
     ".CCKKKKK", "..KK...."] },
 ];
 
+// Eye styles at fine resolution (4 x 4, left eye; right eye is mirrored)
 const EYE_STYLES = {
-  round: [[0, 0, "K"], [1, 0, "K"], [0, 1, "K"], [1, 1, "K"], [0, 0, "W"]],
-  big:   [[0, 0, "K"], [1, 0, "W"], [0, 1, "K"], [1, 1, "K"]],
-  dot:   [[1, 0, "K"], [1, 1, "K"]],
-  wide:  [[0, 0, "W"], [1, 0, "W"], [0, 1, "W"], [1, 1, "K"]],
-  glow:  [[0, 0, "A"], [1, 0, "W"], [0, 1, "A"], [1, 1, "A"]],
+  round: [".KK.", "KWKK", "KKKK", ".KK."],
+  big:   ["KKKK", "KWWK", "KWKK", "KKKK"],
+  dot:   ["....", ".KK.", ".KK.", "...."],
+  wide:  [".WW.", "WWKK", "WWKK", ".WW."],
+  glow:  [".AA.", "AWWA", "AWAA", ".AA."],
+  shine: [".KK.", "KKWK", "KKKK", "WKK."],
 };
+const BLINK_EYE = ["....", "....", "K..K", ".KK."];
 const ACCESSORIES = ["hat", "crown", "headphones", "glasses", "scarf", "none"];
 
-// Sprite working buffer: template (16x18) sits at (OX, OY) so hats and
-// outlines have room. The whole buffer is drawn at grid (SPR_X, SPR_Y),
-// putting the body at grid columns 8..23 and rows 7..24, safely inside
-// the circular crop (radius 16 around the centre).
+// Sprite working buffer (layout units): template (16x18) sits at (OX, OY)
+// so hats and outlines have room. It is smoothed 2x into a fine sprite and
+// drawn at layout (SPR_X, SPR_Y): body at columns 8..23 and rows 7..24,
+// safely inside the circular crop (radius 16 around the centre).
 const SW = 24, SH = 26, OX = 4, OY = 5, SPR_X = 4, SPR_Y = 2;
+const FW = SW * S, FH = SH * S;
 const INK = hex("#1a1423"), OUTLINE = hex("#07050b"), WHITE = hex("#f7f3ea");
 
 function symbolColors(type, body, accent) {
@@ -603,13 +707,37 @@ function symbolColors(type, body, accent) {
   return c;
 }
 
-function buildCharacter(R, theme) {
-  const type = R.pick(TYPES);
-  const body = hex(R.pick(theme.bodies));
+// Scale2x (EPX): doubles pixel art while rounding stair-step corners
+function scale2x(src, w, h) {
+  const out = new Int32Array(w * 2 * h * 2);
+  const at = (x, y) => (x < 0 || y < 0 || x >= w || y >= h ? -1 : src[y * w + x]);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const P = at(x, y), A = at(x, y - 1), B = at(x + 1, y), C = at(x - 1, y), D = at(x, y + 1);
+    let e0 = P, e1 = P, e2 = P, e3 = P;
+    if (C === A && C !== D && A !== B) e0 = A;
+    if (A === B && A !== C && B !== D) e1 = B;
+    if (D === C && D !== B && C !== A) e2 = C;
+    if (B === D && B !== A && D !== C) e3 = D;
+    const o = (y * 2) * w * 2 + x * 2;
+    out[o] = e0; out[o + 1] = e1; out[o + w * 2] = e2; out[o + w * 2 + 1] = e3;
+  }
+  return out;
+}
+
+// equal odds normally; if any keyword matched, only matched options remain
+function keywordWeights(keys, counts) {
+  const any = keys.some((k) => counts[k]);
+  return keys.map((k) => (any ? counts[k] || 0 : 1));
+}
+
+function buildCharacter(R, theme, hints) {
+  const type = R.weighted(TYPES, keywordWeights(TYPES.map((t) => t.key), hints.count.type));
+  const pickedBody = hex(R.pick(theme.bodies));
+  const body = hints.color ?? pickedBody;                         // "red" paints it red
   const accentChoices = theme.accents.filter((a) => hex(a) !== body);
   const accent = hex(R.pick(accentChoices));
   const eyeStyle = R.pick(type.eyes || Object.keys(EYE_STYLES));
-  const accessory = R.pick(ACCESSORIES);
+  const accessory = R.weighted(ACCESSORIES, keywordWeights(ACCESSORIES, hints.count.accessory));
   const colors = symbolColors(type, body, accent);
 
   const base = new Int32Array(SW * SH).fill(-1);
@@ -628,7 +756,7 @@ function buildCharacter(R, theme) {
     for (let x = 0; x < 8; x++) { const s = row[x]; if (s !== ".") put(x, y, colors[s]); }
   });
 
-  const [ex, ey] = type.eye, hT = type.headTop;
+  const [, ey] = type.eye, hT = type.headTop;
   if (accessory === "hat") {
     const hat = hex("#1d1726");
     for (let x = 4; x <= 7; x++) put(x, hT - 1, hat);
@@ -654,66 +782,83 @@ function buildCharacter(R, theme) {
     put(Math.max(0, left - 1), n + 2, accent); put(Math.max(0, left - 1), n + 3, stripe);
   }
 
-  // dark outline around the whole silhouette (4-neighbour)
-  const outline = new Uint8Array(SW * SH);
-  for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
-    if (base[y * SW + x] !== -1) continue;
-    const n = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
-      const nx = x + dx, ny = y + dy;
-      return nx >= 0 && ny >= 0 && nx < SW && ny < SH && base[ny * SW + nx] !== -1;
-    });
-    if (n) outline[y * SW + x] = 1;
+  // smooth to fine resolution, then add soft volume to the body colour
+  const fine = scale2x(base, SW, SH);
+  const shaded = Int32Array.from(fine);
+  const fat = (x, y) => (x < 0 || y < 0 || x >= FW || y >= FH ? -1 : fine[y * FW + x]);
+  const hi = mix(colors.B, 0xffffff, 0.32), lo = mix(colors.B, 0x000000, 0.2);
+  for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+    if (fine[y * FW + x] !== colors.B) continue;
+    if (fat(x, y - 1) === -1) shaded[y * FW + x] = hi;                       // rim light on top edges
+    else if (fat(x, y + 1) === -1 || fat(x, y + 2) === -1) shaded[y * FW + x] = lo; // shade underneath
   }
-  return { type, body, accent, eyeStyle, accessory, colors, base, outline };
+
+  // thin dark outline around the whole silhouette (8-neighbour, 1 fine px)
+  const outline = new Uint8Array(FW * FH);
+  for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+    if (fine[y * FW + x] !== -1) continue;
+    for (let dy = -1; dy <= 1 && !outline[y * FW + x]; dy++)
+      for (let dx = -1; dx <= 1; dx++) if (fat(x + dx, y + dy) !== -1) { outline[y * FW + x] = 1; break; }
+  }
+  return { type, body, accent, eyeStyle, accessory, colors, fine: shaded, outline };
 }
 
-// Draw the character for frame t into the 32x32 frame buffer
+// Draw the character for frame t into the 64x64 frame buffer
 function drawCharacter(fb, scene, t, still) {
   const ch = scene.character, { type, colors } = ch;
-  const bob = still ? 0 : Math.round(Math.sin(t * 0.06));
-  const blink = !still && mod(t + scene.blinkPhase, scene.blinkPeriod) < 7;
+  const bob = still ? 0 : Math.round(Math.sin(t * 0.06) * 1.5);
+  const blink = !still && mod(t + scene.blinkPhase, scene.blinkPeriod) < 6;
 
-  const sprite = Int32Array.from(ch.base);
-  const put = (x, y, c) => {
-    const by = OY + y;
-    [OX + x, OX + (15 - x)].forEach((bx) => {
-      if (bx >= 0 && by >= 0 && bx < SW && by < SH) sprite[by * SW + bx] = c;
+  const sprite = Int32Array.from(ch.fine);
+  const OXF = OX * S, OYF = OY * S;
+  const put = (x, y, c) => { // fine template coords (0..31), mirrored
+    const by = OYF + y;
+    [OXF + x, OXF + (31 - x)].forEach((bx) => {
+      if (bx >= 0 && by >= 0 && bx < FW && by < FH) sprite[by * FW + bx] = c;
     });
   };
-  const at = (x, y) => sprite[(OY + y) * SW + OX + x];
-  const [ex, ey] = type.eye, my = type.mouth, mood = scene.mood.label;
+  const at = (x, y) => sprite[(OYF + y) * FW + OXF + x];
+  const ex = type.eye[0] * S, ey = type.eye[1] * S, my = type.mouth * S, mood = scene.mood.label;
 
-  // eyes
-  if (blink) { put(ex, ey + 1, INK); put(ex + 1, ey + 1, INK); }
-  else EYE_STYLES[ch.eyeStyle].forEach(([dx, dy, s]) => put(ex + dx, ey + dy, colors[s] ?? INK));
+  // eyes (4 x 4)
+  const pattern = blink ? BLINK_EYE : EYE_STYLES[ch.eyeStyle];
+  pattern.forEach((row, dy) => {
+    for (let dx = 0; dx < 4; dx++) {
+      const s = row[dx];
+      if (s !== ".") put(ex + dx, ey + dy, colors[s] ?? INK);
+    }
+  });
 
   // cheeks + mouth follow the mood
   if (mood === "positive") {
-    const blush = mix(ch.body, hex("#ff5c8a"), 0.6);
-    if (at(ex - 1, ey + 2) !== -1) put(ex - 1, ey + 2, blush);
-    put(6, my, INK); put(7, my + 1, INK);
+    const blush = mix(ch.body, hex("#ff5c8a"), 0.55);
+    for (let dx = -1; dx <= 1; dx++) if (at(ex + dx, ey + 5) !== -1) put(ex + dx, ey + 5, blush);
+    put(12, my, INK); put(13, my + 1, INK); put(14, my + 2, INK); put(15, my + 2, INK);
+    put(14, my + 1, hex("#ff6b8b")); put(15, my + 1, hex("#ff6b8b")); // little tongue
   } else if (mood === "negative") {
-    put(7, my, INK); put(6, my + 1, INK);
-    const drop = still ? 0 : Math.floor(t / 9) % 3;
-    put(ex, ey + 2 + drop, hex("#7fd4ff"));
-    if (drop > 0) put(ex, ey + 1 + drop, mix(hex("#7fd4ff"), 0xffffff, 0.5));
+    put(14, my + 1, INK); put(15, my + 1, INK); put(13, my + 2, INK); put(12, my + 3, INK);
+    const drop = still ? 0 : Math.floor(t / 5) % 5;
+    const tear = hex("#7fd4ff");
+    put(ex + 1, ey + 4 + drop, tear); put(ex + 1, ey + 5 + drop, mix(tear, 0xffffff, 0.45));
   } else {
-    put(6, my, INK); put(7, my, INK);
+    put(13, my + 1, INK); put(14, my + 1, INK); put(15, my + 1, INK);
   }
-  if (type.fangs && mood !== "negative") put(6, my + 1, WHITE);
+  if (type.fangs && mood !== "negative") { put(13, my + 2, WHITE); put(13, my + 3, WHITE); }
 
   // glasses sit on top of the eyes
   if (ch.accessory === "glasses") {
     const frame = lum(ch.body) > 0.55 ? hex("#221a2e") : hex("#f2f2f2");
-    for (let x = ex - 1; x <= ex + 2; x++) { put(x, ey - 1, frame); put(x, ey + 2, frame); }
-    put(ex - 1, ey, frame); put(ex - 1, ey + 1, frame); put(ex + 2, ey, frame); put(ex + 2, ey + 1, frame);
-    for (let x = ex + 3; x <= 7; x++) put(x, ey, frame);
+    for (let x = ex - 1; x <= ex + 4; x++) { put(x, ey - 1, frame); put(x, ey + 4, frame); }
+    for (let y = ey; y <= ey + 3; y++) { put(ex - 1, y, frame); put(ex + 4, y, frame); }
+    for (let x = ex + 5; x <= 15; x++) put(x, ey + 1, frame);
+    put(ex, ey - 1, mix(frame, 0xffffff, 0.5));
   }
 
-  for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
-    const c = sprite[y * SW + x];
-    if (c !== -1) setPx(fb, SPR_X + x, SPR_Y + y + bob, c);
-    else if (ch.outline[y * SW + x]) setPx(fb, SPR_X + x, SPR_Y + y + bob, OUTLINE);
+  const ox = SPR_X * S, oy = SPR_Y * S + bob;
+  for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+    const c = sprite[y * FW + x];
+    if (c !== -1) fineSet(fb, ox + x, oy + y, c);
+    else if (ch.outline[y * FW + x]) fineSet(fb, ox + x, oy + y, OUTLINE);
   }
 }
 
@@ -741,7 +886,9 @@ function drawParticles(fb, scene, t) {
       case "rain": {
         const y = mod(p.y + t * (0.6 + p.sp * 0.5), 40) - 4;
         const x = mod(p.x + y * 0.25, GRID);
-        setPx(fb, x, y, hex("#a9c8ea")); blendPx(fb, x - 0.25, y - 1, hex("#a9c8ea"), 0.5);
+        dotPx(fb, x, y, hex("#b9d6f2"));
+        dotBlend(fb, x - 0.125, y - 0.5, hex("#a9c8ea"), 0.65);
+        dotBlend(fb, x - 0.25, y - 1, hex("#a9c8ea"), 0.35);
         break;
       }
       case "bats": {
@@ -761,17 +908,19 @@ function drawParticles(fb, scene, t) {
       case "stars": {
         const x = p.x, y = (p.y / 40) * 21;
         const v = (Math.sin(t * (0.03 + p.sp * 0.06) + p.ph) + 1) / 2;
-        setPx(fb, x, y, mix(hex("#2c2c55"), 0xffffff, v));
-        if (v > 0.88) [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => blendPx(fb, x + dx, y + dy, hex("#9fb4ff"), 0.7));
+        dotPx(fb, x, y, mix(hex("#2c2c55"), 0xffffff, v));
+        if (v > 0.8) [[0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]].forEach(([dx, dy]) => dotBlend(fb, x + dx, y + dy, hex("#b8c6ff"), (v - 0.8) * 4));
+        if (v > 0.95) [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => dotBlend(fb, x + dx, y + dy, hex("#9fb4ff"), 0.35));
         break;
       }
       case "bubbles": {
         const y = mod(p.y - t * (0.12 + p.sp * 0.2), 40) - 4;
-        const x = p.x + Math.round(Math.sin(t * 0.05 + p.ph));
-        if (p.size === 1) blendPx(fb, x, y, hex("#dfffff"), 0.75);
-        else {
-          blendPx(fb, x, y, 0xffffff, 0.9);
-          [[1, 0], [0, 1], [1, 1]].forEach(([dx, dy]) => blendPx(fb, x + dx, y + dy, hex("#8fe8f5"), 0.55));
+        const x = p.x + Math.sin(t * 0.05 + p.ph) * 0.75;
+        if (p.size === 1) dotBlend(fb, x, y, hex("#dfffff"), 0.8);
+        else { // little ring with a shine
+          [[0.5, 0], [0, 0.5], [1, 0.5], [0.5, 1]].forEach(([dx, dy]) => dotBlend(fb, x + dx, y + dy, hex("#a8f0fa"), 0.75));
+          dotPx(fb, x + 0.5, y + 0.5, mix(getPx(fb, x + 0.5, y + 0.5), 0xffffff, 0.15));
+          dotPx(fb, x + 0.5, y, 0xffffff);
         }
         break;
       }
@@ -780,22 +929,24 @@ function drawParticles(fb, scene, t) {
         const y = mod(p.y + t * sp, 38) - 3;
         const x = mod(p.x + t * sp * 0.6 + Math.sin(t * 0.04 + p.ph) * 2, GRID);
         const c = hex(["#ff9ecd", "#ffffff", "#ffd1e8", "#ffb3c7"][p.c]);
-        setPx(fb, x, y, c);
-        if (Math.floor(t / 15 + p.ph) % 2) setPx(fb, x + 1, y, c); else setPx(fb, x, y + 1, c);
+        dotPx(fb, x, y, c); dotPx(fb, x + 0.5, y, c);
+        if (Math.floor(t / 15 + p.ph) % 2) dotPx(fb, x + 0.5, y + 0.5, mix(c, 0xff5c8a, 0.3));
+        else dotPx(fb, x, y + 0.5, mix(c, 0xff5c8a, 0.3));
         break;
       }
       case "neonrain": {
         const y = mod(p.y + t * (0.8 + p.sp * 0.6), 40) - 4;
         const c = hex(["#ff2bd6", "#00f0ff", "#ff2bd6", "#f9f871"][p.c]);
-        setPx(fb, p.x, y, c); blendPx(fb, p.x, y - 1, c, 0.6); blendPx(fb, p.x, y - 2, c, 0.3);
+        dotPx(fb, p.x, y, 0xffffff);
+        [0.5, 1, 1.5, 2].forEach((k, i) => dotBlend(fb, p.x, y - k, c, 0.85 - i * 0.2));
         break;
       }
       case "sprinkles": {
         const y = mod(p.y + t * (0.12 + p.sp * 0.13), 38) - 3;
         const x = p.x + Math.round(Math.sin(t * 0.03 + p.ph));
         const c = hex(["#ff3d7f", "#3dc1ff", "#ffe14d", "#7cf7a8"][p.c]);
-        setPx(fb, x, y, c);
-        if (Math.floor(t * 0.05 + p.ph) % 2) setPx(fb, x + 1, y, c); else setPx(fb, x, y + 1, c);
+        const horiz = Math.floor(t * 0.05 + p.ph) % 2;
+        for (let k = 0; k < 3; k++) dotPx(fb, x + (horiz ? k * 0.5 : 0), y + (horiz ? 0 : k * 0.5), c);
         break;
       }
     }
@@ -822,21 +973,22 @@ function makeName(R, theme, type, mood) {
 function buildScene(seed, sentence) {
   const R = makeRng(seed);
   const mood = analyzeMood(sentence);
-  const theme = pickTheme(R, mood);
+  const hints = analyzeWords(sentence);
+  const theme = pickTheme(R, mood, hints);
   const bg = theme.bg(R);
-  const character = buildCharacter(R, theme);
+  const character = buildCharacter(R, theme, hints);
   const particles = initParticles(theme.particle, R);
   const name = makeName(R, theme, character.type, mood);
   const blinkPeriod = 160 + R.int(140);
   const blinkPhase = R.int(blinkPeriod);
-  return { seed, sentence, mood, theme, bg, character, particles, name, blinkPeriod, blinkPhase, startFrame: 0 };
+  return { seed, sentence, mood, hints, theme, bg, character, particles, name, blinkPeriod, blinkPhase, startFrame: 0 };
 }
 
 const fb = newBuf();
 const art = document.createElement("canvas");
-art.width = art.height = GRID;
+art.width = art.height = FINE;
 const artCtx = art.getContext("2d");
-const artImg = artCtx.createImageData(GRID, GRID);
+const artImg = artCtx.createImageData(FINE, FINE);
 
 function renderArt(scene, t, still = false) {
   fb.set(scene.bg.base);
@@ -852,9 +1004,9 @@ function renderArt(scene, t, still = false) {
   return art;
 }
 
-// tiny pixel-font stamp: "PIXELSO · NAME · #SEED"
+// tiny pixel-font stamp: "PIXEL SOUL · NAME · #SEED"
 function drawStamp(ctx, size, scene) {
-  const label = `PIXELSO · ${scene.name.toUpperCase()} · ${seedToHex(scene.seed)}`;
+  const label = `PIXEL SOUL · ${scene.name.toUpperCase()} · ${seedToHex(scene.seed)}`;
   const barH = Math.round(size * 0.065);
   ctx.save();
   ctx.imageSmoothingEnabled = false;
@@ -908,6 +1060,35 @@ function draw() {
   previewCtx.drawImage(art, 0, 0, ui.preview.width, ui.preview.height);
 }
 
+/* Show exactly how the sentence shaped this avatar */
+function renderWordsUsed(sc) {
+  const box = $("wordsUsed");
+  if (!box) return;
+  const h = sc.hints, ch = sc.character, items = [];
+  const q = (w) => `\u201c${w}\u201d`;
+  if (h.theme[sc.theme.key]) items.push([q(h.theme[sc.theme.key]), `${sc.theme.name} scene`]);
+  if (h.type[ch.type.key]) items.push([q(h.type[ch.type.key]), `${ch.type.name}`]);
+  if (h.colorWord) items.push([q(h.colorWord), `${h.colorWord} body`]);
+  if (h.accessory[ch.accessory]) items.push([q(h.accessory[ch.accessory]), ch.accessory]);
+  const face = { positive: "smiling face", negative: "sad face + tears", neutral: "calm face" }[sc.mood.label];
+  const moodWords = sc.mood.label === "positive" ? sc.mood.positive : sc.mood.label === "negative" ? sc.mood.negative : [];
+  if (moodWords.length) items.push([moodWords.slice(0, 3).map(q).join(" "), `${sc.mood.label} mood, ${face}`]);
+  else items.push(["no mood words", face]);
+  items.push(["your exact words + the moment", `seed ${seedToHex(sc.seed)}`]);
+  box.innerHTML = "";
+  const title = document.createElement("span");
+  title.className = "words-title";
+  title.textContent = "How your words shaped it";
+  box.appendChild(title);
+  items.forEach(([from, to]) => {
+    const chip = document.createElement("span");
+    chip.className = "word-chip";
+    const a = document.createElement("b"); a.textContent = from;
+    chip.append(a, document.createTextNode(" \u2192 " + to));
+    box.appendChild(chip);
+  });
+}
+
 /* Redraw everything from a given seed (used by links, gallery, rerolls) */
 function drawFromSeed(seed, sentence = "", { save = true } = {}) {
   scene = buildScene(seed >>> 0, sentence);
@@ -917,6 +1098,7 @@ function drawFromSeed(seed, sentence = "", { save = true } = {}) {
   ui.seed.textContent = seedToHex(seed);
   ui.bio.classList.add("hidden");
   ui.bio.textContent = "";
+  renderWordsUsed(scene);
   if (save) addToGallery(scene);
   renderGallery();
   maybeFetchBio(scene);
@@ -963,7 +1145,7 @@ function renderExportCanvas() {
   if (ui.stamp.checked) drawStamp(ctx, EXPORT_SIZE, scene);
   return out;
 }
-const fileName = () => `pixelso-${scene.name.replace(/\s+/g, "-")}-${seedToHex(scene.seed).slice(1)}.png`;
+const fileName = () => `pixel-soul-${scene.name.replace(/\s+/g, "-")}-${seedToHex(scene.seed).slice(1)}.png`;
 const toBlob = (canvas) => new Promise((res) => canvas.toBlob(res, "image/png"));
 
 async function downloadPNG() {
@@ -988,7 +1170,7 @@ async function sharePNG() {
   const blob = await toBlob(renderExportCanvas());
   const file = new File([blob], fileName(), { type: "image/png" });
   try {
-    await navigator.share({ files: [file], title: "My Pixelso", text: `Meet ${scene.name} ${seedToHex(scene.seed)}` });
+    await navigator.share({ files: [file], title: "My Pixel Soul", text: `Meet ${scene.name} ${seedToHex(scene.seed)}` });
   } catch (e) {
     if (e && e.name !== "AbortError") downloadPNG();
   }
@@ -1159,4 +1341,4 @@ ui.clearKey.addEventListener("click", () => { ui.apiKey.value = ""; saveSettings
 })();
 
 // expose for console / later features (shared rings)
-window.Pixelso = { drawFromSeed, makeSeed, seedToHex, hexToSeed, buildScene };
+window.PixelSoul = window.Pixelso = { drawFromSeed, makeSeed, seedToHex, hexToSeed, buildScene, analyzeWords };
