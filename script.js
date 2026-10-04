@@ -162,6 +162,82 @@ const sideX = (R, margin = 2) => (R.chance(0.5) ? margin + R.int(8 - margin) : 2
    3. Themes: palette, background painter and animated layer
    Each bg(R) paints a static Int32Array and may return anim(fb, t).
    --------------------------------------------------------------------- */
+// ----- extra painters used by the newer themes -----
+function fineDisc(b, fcx, fcy, fr, c) {
+  for (let fy = Math.floor(fcy - fr); fy <= Math.ceil(fcy + fr); fy++)
+    for (let fx = Math.floor(fcx - fr); fx <= Math.ceil(fcx + fr); fx++) {
+      const dx = fx + 0.5 - fcx, dy = fy + 0.5 - fcy;
+      if (dx * dx + dy * dy <= fr * fr) fineSet(b, fx, fy, c);
+    }
+}
+function fineGround(b, fromY, c1, c2, mixAt = 0.5) {
+  for (let fy = Math.round(fromY * S); fy < FINE; fy++)
+    for (let fx = 0; fx < FINE; fx++) fineSet(b, fx, fy, BAYER[(fy % 2) * 2 + (fx % 2)] < mixAt ? c1 : c2);
+}
+function mountain(b, cx, peakY, baseY, halfW, col, capCol) {
+  const f0 = peakY * S, f1 = baseY * S;
+  for (let fy = f0; fy <= f1; fy++) {
+    const w = ((fy - f0) / (f1 - f0)) * halfW * S;
+    const capLine = f0 + (f1 - f0) * 0.28;
+    for (let fx = Math.round(cx * S + 1 - w); fx <= Math.round(cx * S + 1 + w); fx++) {
+      const isCap = capCol && fy < capLine + ((fx * 7) % 3);
+      fineSet(b, fx, fy, isCap ? capCol : (fx < cx * S + 1 - w * 0.35 ? mix(col, 0xffffff, 0.08) : col));
+    }
+  }
+}
+function pine(b, x, baseY, h, col, snowCol) {
+  const cx = x * S + 1, base = baseY * S;
+  rectPx(b, x, baseY - 1.5, 1, 1.5, hex("#4a2f1f"));
+  const tiers = 3, th = (h * S) / tiers;
+  for (let t = 0; t < tiers; t++) {
+    const tierBase = base - 3 - t * th * 0.75, maxW = h * S * 0.32 * (1 - t * 0.22);
+    for (let k = 0; k < th; k++) {
+      const w = ((th - k) / th) * maxW, fy = Math.round(tierBase - k);
+      for (let fx = Math.round(cx - w); fx <= Math.round(cx + w); fx++)
+        fineSet(b, fx, fy, snowCol && k < 2 ? snowCol : (fx < cx ? mix(col, 0xffffff, 0.1) : col));
+    }
+  }
+}
+function roundTree(b, x, baseY, h, c0, c1) {
+  rectPx(b, x, baseY - h + 2, 1, h - 1.5, hex("#5a3a24"));
+  const top = baseY - h;
+  discPx(b, x, top + 1, 3, c0); discPx(b, x - 2, top + 3, 2, c0); discPx(b, x + 2, top + 3, 2, c0);
+  discPx(b, x - 1, top, 1, c1); discPx(b, x + 1, top + 2, 1, c1);
+}
+function palm(b, px, baseY, h, lean) {
+  let tx = px; const top = baseY - h;
+  for (let y = baseY; y >= top; y--) {
+    if ((baseY - y) % 4 === 3) tx += lean * 0.5;
+    setPx(b, tx, y, hex((y % 2) ? "#7a4a2a" : "#5c361d"));
+  }
+  const leaf = hex("#2f7d3a"), leaf2 = hex("#3fa04a");
+  [[-1, 0], [1, 0], [-1, 1], [1, 1], [-0.6, -0.8], [0.6, -0.8]].forEach(([dx, dy], i) => {
+    for (let k = 1; k <= 5; k++) setPx(b, tx + dx * k, top + dy * k + (k > 2 && dy >= 0 ? (k - 2) * 0.5 : 0), i % 2 ? leaf : leaf2);
+  });
+  dotPx(b, tx - 0.5, top + 1, hex("#6b3f1f")); dotPx(b, tx + 1, top + 1, hex("#6b3f1f"));
+}
+function leafShape(b, x, y, dir, c) {
+  for (let k = 0; k <= 12; k++) {
+    const u = k / 12;
+    const fcx = (x + dir * u * 6) * S, fcy = (y - u * 2 + u * u * 3) * S;
+    fineDisc(b, fcx, fcy, Math.sin(u * Math.PI) * 3 + 0.6, c);
+  }
+  for (let k = 1; k < 12; k++) {
+    const u = k / 12;
+    fineSet(b, Math.round((x + dir * u * 6) * S), Math.round((y - u * 2 + u * u * 3) * S), mix(c, 0x000000, 0.25));
+  }
+}
+function block(b, x, y, c) {
+  rectPx(b, x, y, 2, 2, c);
+  for (let k = 0; k < 4; k++) { dotPx(b, x + k * 0.5, y, mix(c, 0xffffff, 0.45)); dotPx(b, x, y + k * 0.5, mix(c, 0xffffff, 0.3)); }
+  for (let k = 1; k < 4; k++) { dotPx(b, x + k * 0.5, y + 1.5, mix(c, 0x000000, 0.3)); dotPx(b, x + 1.5, y + k * 0.5, mix(c, 0x000000, 0.3)); }
+}
+function heart(b, x, y, c) {
+  [".X.X.", "XXXXX", ".XXX.", "..X.."].forEach((row, j) => {
+    for (let i = 0; i < 5; i++) if (row[i] === "X") fineSet(b, Math.round(x * S) + i, Math.round(y * S) + j, c);
+  });
+}
+
 const THEMES = [
   {
     key: "haunted", name: "Haunted", mood: "negative", particle: "bats",
@@ -497,6 +573,356 @@ const THEMES = [
       };
     },
   },
+  {
+    key: "snow", name: "Snowy Peaks", mood: "neutral", particle: "snow",
+    words: ["frosty", "snowy", "alpine", "icicle", "yeti", "himalayan"],
+    bodies: ["#ff7a7a", "#7fb0ff", "#ffd166", "#b39cff", "#7cf7d4", "#ff9ecd"],
+    accents: ["#ff3d5a", "#2d62ff", "#ffffff", "#ffb627"],
+    bg(R) {
+      const b = newBuf();
+      gradient(b, ["#8fb9e3", "#b3d1ef", "#d7e8f7"], 0, 24);
+      mountain(b, 4 + R.int(8), 6 + R.int(3), 24, 12, hex("#9db4d4"), hex("#ffffff"));
+      mountain(b, 20 + R.int(8), 4 + R.int(3), 24, 13, hex("#87a1c6"), hex("#f4f8ff"));
+      mountain(b, 13 + R.int(6), 11 + R.int(3), 25, 10, hex("#6f8db8"), hex("#e8f0fb"));
+      fineGround(b, 25, hex("#dfe9f5"), hex("#f4f8ff"), 0.25);
+      for (let i = 0; i < 4; i++) pine(b, sideX(R, 1), 27 + R.int(3), 7 + R.int(4), hex("#2f6b4f"), hex("#f4f8ff"));
+      return { base: b, anim: null };
+    },
+  },
+  {
+    key: "desert", name: "Desert Dunes", mood: "neutral", particle: "sand",
+    words: ["dusty", "sandy", "mirage", "oasis", "nomad", "sunbaked"],
+    bodies: ["#7cc4ff", "#ff7eb6", "#7cf7a8", "#c9a0ff", "#fff1c2", "#ff6b6b"],
+    accents: ["#2d62ff", "#ff3d7f", "#034f46", "#ffffff"],
+    bg(R) {
+      const b = newBuf();
+      const dusk = R.chance(0.4);
+      gradient(b, dusk ? ["#5b3a8a", "#d0607a", "#ff9f5a", "#ffd08a"] : ["#6cbcef", "#9fd4f4", "#ffe6b0"], 0, 22);
+      discPx(b, sideX(R, 3), dusk ? 17 : 5, 3, hex(dusk ? "#ffe1a8" : "#fff6d6"));
+      for (let i = 0; i < 2; i++) {
+        const mx = R.int(GRID), w = 4 + R.int(5), h = 3 + R.int(4);
+        rectPx(b, mx, 22 - h, w, h + 1, hex(dusk ? "#8a4a5a" : "#c97a4a"));
+        rectPx(b, mx - 1, 22 - h, w + 2, 1, hex(dusk ? "#9c5866" : "#d98c5a"));
+      }
+      const ph = R.next() * 6;
+      for (let fx = 0; fx < FINE; fx++) {
+        const x = fx / S, h1 = 22 + Math.sin(x * 0.22 + ph) * 1.5, h2 = 26 + Math.sin(x * 0.3 + ph * 2) * 1.2;
+        for (let fy = Math.round(h1 * S); fy < FINE; fy++) {
+          const back = fy < h2 * S, edge = back ? fy < h1 * S + 2 : fy < h2 * S + 2;
+          fineSet(b, fx, fy, hex(back ? (edge ? "#f7d58a" : "#e9b864") : (edge ? "#ffe2a0" : "#f2c46d")));
+        }
+      }
+      const cx = sideX(R, 2), cy = 27, g = hex("#3f8a4a");
+      rectPx(b, cx, cy - 7, 1, 8, g); rectPx(b, cx - 2, cy - 5, 1, 3, g); rectPx(b, cx - 2, cy - 3, 2, 1, g);
+      rectPx(b, cx + 2, cy - 6, 1, 3, g); rectPx(b, cx + 1, cy - 4, 2, 1, g);
+      return { base: b, anim: null };
+    },
+  },
+  {
+    key: "volcano", name: "Volcano", mood: "negative", particle: "embers",
+    words: ["molten", "lava", "ember", "blazing", "magma", "scorched"],
+    bodies: ["#ffd166", "#7cf7d4", "#c9a0ff", "#ff9ecd", "#8fd3ff", "#f2f2f2"],
+    accents: ["#ff6a00", "#ffd166", "#ffffff", "#ff3d3d"],
+    bg(R) {
+      const b = newBuf();
+      gradient(b, ["#140707", "#2e0c0c", "#5c1a12", "#9a3218"], 0, 25);
+      const vx = 16 + (R.chance(0.5) ? -7 : 7);
+      for (let fy = 0; fy < 26 * S; fy++) for (let fx = 0; fx < FINE; fx++) { // eruption glow in the sky
+        const d = Math.hypot(fx - vx * S, fy - 8 * S);
+        if (d < 26) fineBlend(b, fx, fy, hex("#ff7a2a"), 0.45 * (1 - d / 26));
+      }
+      for (let fy = 8 * S; fy < 26 * S; fy++) {
+        const k = (fy - 8 * S) / (18 * S), w = (2.5 + k * 13) * S;
+        for (let fx = Math.round(vx * S - w); fx <= Math.round(vx * S + w); fx++) {
+          const lit = fx < vx * S - w * 0.2;
+          fineSet(b, fx, fy, hex(lit ? (BAYER[(fy % 2) * 2 + (fx % 2)] < 0.3 ? "#6b3324" : "#5a2a1e") : "#3d1c15"));
+        }
+      }
+      rectPx(b, vx - 2, 8, 5, 1, hex("#ffd23a")); rectPx(b, vx - 1.5, 7.5, 4, 0.5, hex("#ff9a2e"));
+      const streams = [];
+      for (let i = 0; i < 3; i++) {
+        let x = vx - 1 + R.int(3); const pts = [];
+        for (let y = 10; y < 26; y++) { if (R.chance(0.35)) x += R.chance(0.5) ? -1 : 1; pts.push([x, y]); }
+        streams.push(pts);
+      }
+      fineGround(b, 26, hex("#1a0c09"), hex("#241210"));
+      const cracks = [];
+      for (let i = 0; i < 5; i++) cracks.push([R.int(GRID), 27 + R.int(5), 2 + R.int(4)]);
+      return {
+        base: b,
+        anim(fb, t) {
+          const pulse = (Math.sin(t * 0.08) + 1) / 2;
+          streams.forEach((pts) => pts.forEach(([x, y], i) => {
+            const hot = mod(i - t * 0.15, 8) < 2;
+            setPx(fb, x, y, hex("#e04a00"));
+            dotPx(fb, x, y, mix(hex("#ff5a00"), hex("#ffd23a"), hot ? 1 : pulse * 0.5));
+          }));
+          cracks.forEach(([x, y, l]) => { for (let k = 0; k < l; k++) dotPx(fb, x + k * 0.5, y + (k % 2) * 0.5, mix(hex("#b33a00"), hex("#ffb02e"), pulse)); });
+          for (let i = 0; i < 14; i++) {
+            const yy = 8 - mod(t * 0.05 + i * 0.7, 8);
+            blendPx(fb, vx - 1 + Math.sin(i * 1.7 + t * 0.02) * 2 + (8 - yy) * 0.4, yy, hex("#3a2a2a"), 0.5);
+          }
+        },
+      };
+    },
+  },
+  {
+    key: "autumn", name: "Autumn Woods", mood: "positive", particle: "leaves",
+    words: ["maple", "harvest", "amber", "acorn", "rustling", "cinnamon"],
+    bodies: ["#8fd3ff", "#c9a0ff", "#ffe066", "#7cf7a8", "#ff9ecd", "#f2f2f2"],
+    accents: ["#d1495b", "#034f46", "#ffffff", "#2d62ff"],
+    bg(R) {
+      const b = newBuf();
+      gradient(b, ["#ffc58f", "#ffd9ad", "#ffeccf"], 0, 22);
+      const ph = R.next() * 6;
+      for (let x = 0; x < GRID; x++) { const h = 20 + Math.round(Math.sin(x * 0.3 + ph) * 1.5); for (let y = h; y < 25; y++) setPx(b, x, y, hex("#d9935a")); }
+      fineGround(b, 24, hex("#b8692f"), hex("#c97b3a"));
+      const leafCols = ["#e8572e", "#f2a33a", "#ffcf3a", "#c93a2a"];
+      for (let i = 0; i < 5; i++) {
+        const x = i < 2 ? 1 + R.int(6) : i < 4 ? 25 + R.int(6) : R.int(GRID);
+        roundTree(b, x, 25 + R.int(2), 8 + R.int(5), hex(R.pick(leafCols)), hex(R.pick(leafCols)));
+      }
+      for (let i = 0; i < 40; i++) dotPx(b, R.next() * GRID, 25 + R.next() * 7, hex(R.pick(leafCols)));
+      return { base: b, anim: null };
+    },
+  },
+  {
+    key: "sakura", name: "Sakura Garden", mood: "positive", particle: "petals",
+    words: ["blossom", "sakura", "petal", "zen", "spring", "haiku"],
+    bodies: ["#ffffff", "#8fd3ff", "#ffe066", "#b39cff", "#7cf7a8", "#ff7a8a"],
+    accents: ["#ff3d7f", "#034f46", "#2d62ff", "#ffd166"],
+    bg(R) {
+      const b = newBuf();
+      gradient(b, ["#dcecff", "#f6e4f2", "#ffd3e6"], 0, 23);
+      mountain(b, 16 + (R.chance(0.5) ? -5 : 5), 8, 23, 12, hex("#b8c3e3"), hex("#ffffff"));
+      fineGround(b, 23, hex("#8fcb8c"), hex("#9ed89b"));
+      const px = sideX(R, 3);
+      for (let fy = 27 * S; fy < 29.5 * S; fy++) for (let fx = (px - 3) * S; fx < (px + 4) * S; fx++) fineSet(b, fx, fy, hex("#9fd3e8"));
+      const pinks = ["#ffb7d5", "#ff9cc6", "#ffd1e5"];
+      for (let i = 0; i < 4; i++) {
+        const x = i % 2 ? 2 + R.int(5) : 25 + R.int(5);
+        roundTree(b, x, 25 + R.int(2), 9 + R.int(4), hex(R.pick(pinks)), hex(R.pick(pinks)));
+      }
+      return { base: b, anim: null };
+    },
+  },
+  {
+    key: "backwaters", name: "Kerala Backwaters", mood: "positive", particle: "glints",
+    words: ["malabar", "monsoon", "backwater", "coconut", "kochi", "lagoon"],
+    bodies: ["#ffd166", "#ff7eb6", "#ffffff", "#c9a0ff", "#ff8c5a", "#8fd3ff"],
+    accents: ["#ffcc33", "#d1495b", "#034f46", "#ffffff"],
+    bg(R) {
+      const b = newBuf();
+      const golden = R.chance(0.35);
+      gradient(b, golden ? ["#ff9a5a", "#ffc27a", "#ffe3a8"] : ["#6cc3f2", "#9ad6f7", "#cdeefc"], 0, 17);
+      for (let x = 0; x < GRID; x++) { setPx(b, x, 17, hex("#2f7a3a")); setPx(b, x, 18, hex("#2a6e34")); }
+      for (let i = 0; i < 7; i++) {
+        const x = R.int(GRID);
+        rectPx(b, x, 13, 0.5, 4, hex("#3b5a2a"));
+        [[-1, 0], [1, 0], [-1, 1], [1, 1]].forEach(([dx, dy]) => { for (let k = 1; k <= 3; k++) dotPx(b, x + dx * k * 0.5, 13 + dy * k * 0.5, hex("#2f7a3a")); });
+      }
+      gradient(b, golden ? ["#d99a6a", "#3f8fa8", "#2f7a92"] : ["#5fb8cc", "#3f9fb5", "#2f8aa0"], 19, 31);
+      const hx = sideX(R, 4), hy = 22; // houseboat
+      rectPx(b, hx - 4, hy + 1, 9, 1, hex("#5a3a1f")); rectPx(b, hx - 3, hy + 2, 7, 0.5, hex("#4a2f18"));
+      for (let fx = (hx - 3) * S; fx < (hx + 4) * S; fx++) {
+        const k = Math.abs(fx - (hx + 0.5) * S);
+        for (let fy = (hy - 2) * S + Math.round(k * 0.3); fy < (hy + 1) * S; fy++) fineSet(b, fx, fy, hex(fy % 3 ? "#c9a26b" : "#b38a55"));
+      }
+      rectPx(b, hx - 2, hy, 1, 1, hex("#3a2614")); rectPx(b, hx + 2, hy, 1, 1, hex("#3a2614"));
+      palm(b, 1 + R.int(3), 31, 10 + R.int(4), 1);
+      palm(b, 28 + R.int(3), 31, 10 + R.int(4), -1);
+      return { base: b, anim: null };
+    },
+  },
+  {
+    key: "aurora", name: "Aurora Night", mood: "neutral", particle: "stars",
+    words: ["polar", "aurora", "nordic", "starlit", "glacier", "northern"],
+    bodies: ["#ff7eb6", "#ffd166", "#7cf7d4", "#ffffff", "#ff9f43", "#b39cff"],
+    accents: ["#3dffb0", "#a06bff", "#ffffff", "#ff3d7f"],
+    bg(R) {
+      const b = newBuf();
+      gradient(b, ["#020617", "#041530", "#082447", "#0d3159"], 0, 24);
+      for (let i = 0; i < 30; i++) dotPx(b, R.next() * GRID, R.next() * 20, hex(R.pick(["#ffffff", "#9fb4ff", "#cfd8ff"])));
+      const ph = R.next() * 6;
+      for (let fx = 0; fx < FINE; fx++) {
+        const x = fx / S, h = 22 + Math.sin(x * 0.25 + ph) * 1.2 + Math.sin(x * 0.6) * 0.5;
+        for (let fy = Math.round(h * S); fy < FINE; fy++)
+          fineSet(b, fx, fy, hex(fy < h * S + 2 ? "#e8f0ff" : BAYER[(fy % 2) * 2 + (fx % 2)] < 0.3 ? "#b9c9ea" : "#d3dff5"));
+      }
+      for (let i = 0; i < 5; i++) pine(b, sideX(R, 1), 25 + R.int(3), 6 + R.int(4), hex("#0a1f2e"), null);
+      const ph2 = R.next() * 6, second = R.chance(0.5) ? hex("#a06bff") : hex("#3dd6ff");
+      return {
+        base: b,
+        anim(fb, t) {
+          for (let fx = 0; fx < FINE; fx++) {
+            const x = fx / S;
+            const yc = (6 + Math.sin(x * 0.28 + t * 0.025 + ph2) * 2.2 + Math.sin(x * 0.09 - t * 0.01) * 1.5) * S;
+            const glow = 0.6 + 0.4 * Math.sin(x * 0.5 + t * 0.05);
+            for (let k = 0; k < 14; k++) fineBlend(fb, fx, Math.round(yc + k), k < 6 ? hex("#3dffb0") : second, Math.max(0, (1 - k / 14) * 0.5 * glow));
+          }
+        },
+      };
+    },
+  },
+  {
+    key: "arcade", name: "Retro Arcade", mood: "neutral", particle: "blocks",
+    words: ["arcade", "retro", "8-bit", "combo", "joystick", "high-score"],
+    bodies: ["#ff3d7f", "#3dc1ff", "#ffe14d", "#7cf7a8", "#ff9f43", "#c9a0ff"],
+    accents: ["#ffffff", "#ffe14d", "#ff3d7f", "#3dc1ff"],
+    bg(R) {
+      const b = newBuf();
+      gradient(b, ["#07071a", "#0e0b2e", "#1a0f40"]);
+      for (let f = 0; f < FINE; f += 8) for (let k = 0; k < FINE; k++) { fineBlend(b, k, f, hex("#3b2a8a"), 0.35); fineBlend(b, f, k, hex("#3b2a8a"), 0.35); }
+      const cols = ["#ff3d7f", "#3dc1ff", "#ffe14d", "#7cf7a8", "#ff9f43", "#c58bff"];
+      for (let x = 0; x < GRID; x += 2) {
+        const h = x > 9 && x < 22 ? R.int(2) : 1 + R.int(5);
+        for (let j = 0; j < h; j++) block(b, x, 30 - j * 2, hex(R.pick(cols)));
+      }
+      for (let i = 0; i < 3; i++) heart(b, 1 + i * 3, 1.5, hex("#ff3d5a"));
+      for (let i = 0; i < 6; i++) rectPx(b, 19 + i * 2, 1.5, 1, 1.5, hex("#ffe14d"));
+      return { base: b, anim(fb) { for (let fy = 1; fy < FINE; fy += 2) for (let fx = 0; fx < FINE; fx++) fineBlend(fb, fx, fy, 0x000000, 0.14); } };
+    },
+  },
+  {
+    key: "matrix", name: "Hacker Terminal", mood: "neutral", particle: "code",
+    words: ["root", "binary", "terminal", "kernel", "sudo", "byte"],
+    bodies: ["#39ff14", "#00f0ff", "#f2f2f2", "#ffd166", "#ff2bd6", "#9d4edd"],
+    accents: ["#39ff14", "#00f0ff", "#ffffff", "#ff2bd6"],
+    bg(R) {
+      const b = newBuf();
+      gradient(b, ["#010603", "#02100a", "#031a0f"]);
+      for (let i = 0; i < 140; i++) dotPx(b, R.int(FINE) / S, R.int(FINE) / S, hex(R.pick(["#0a3a1c", "#0d4a22"])));
+      rectPx(b, 0, 0, GRID, 1.5, hex("#0d2a18"));
+      ["#ff5f56", "#ffbd2e", "#27c93f"].forEach((c, i) => fineDisc(b, (1.2 + i * 1.4) * S, 0.75 * S, 1.2, hex(c)));
+      return {
+        base: b,
+        anim(fb, t) {
+          for (let k = 0; k < 3; k++) dotPx(fb, 1 + k * 0.5, 29.5, hex("#1fdc5a"));
+          if (Math.floor(t / 15) % 2) rectPx(fb, 2.5, 29, 1, 1.5, hex("#39ff14"));
+        },
+      };
+    },
+  },
+  {
+    key: "room", name: "Cozy Room", mood: "positive", particle: "dust",
+    words: ["cozy", "homey", "snug", "lofi", "pillow", "teatime"],
+    bodies: ["#8fd3ff", "#ff7eb6", "#7cf7a8", "#c9a0ff", "#ffd166", "#ff8c5a"],
+    accents: ["#d1495b", "#034f46", "#2d62ff", "#ffffff"],
+    bg(R) {
+      const b = newBuf();
+      const night = R.chance(0.5);
+      const wall = R.pick([["#f3d9b1", "#ead0a6"], ["#cfe3d4", "#c3d9c8"], ["#e3d4f0", "#d8c6e8"], ["#f6c8b8", "#efbba9"]]);
+      for (let fy = 0; fy < 23 * S; fy++) for (let fx = 0; fx < FINE; fx++) fineSet(b, fx, fy, hex(Math.floor(fx / 6) % 2 ? wall[0] : wall[1]));
+      for (let fy = 23 * S; fy < FINE; fy++) for (let fx = 0; fx < FINE; fx++) {
+        const plank = Math.floor((fy - 23 * S) / 3), seam = ((fx + plank * 11) % 17) === 0 || (fy - 23 * S) % 3 === 0;
+        fineSet(b, fx, fy, hex(seam ? "#8a5530" : "#a86b3c"));
+      }
+      rectPx(b, 0, 23, GRID, 0.5, hex("#6e4226"));
+      const wx = R.chance(0.5) ? 2 : 22, wy = 4, frame = hex("#6e4a32");
+      rectPx(b, wx, wy, 8, 8, frame);
+      for (let fy = (wy + 0.5) * S; fy < (wy + 7.5) * S; fy++) for (let fx = (wx + 0.5) * S; fx < (wx + 7.5) * S; fx++)
+        fineSet(b, fx, fy, night ? mix(hex("#0d1838"), hex("#24356b"), (fy - wy * S) / (8 * S)) : mix(hex("#7cc6f2"), hex("#cdeefc"), (fy - wy * S) / (8 * S)));
+      if (night) { fineDisc(b, (wx + 5.5) * S, (wy + 2.5) * S, 2.6, hex("#fff3c4")); for (let i = 0; i < 5; i++) dotPx(b, wx + 1 + R.next() * 6, wy + 1 + R.next() * 6, 0xffffff); }
+      else { rectPx(b, wx + 1, wy + 2, 3, 1, 0xffffff); rectPx(b, wx + 1.5, wy + 1.5, 2, 0.5, 0xffffff); }
+      rectPx(b, wx + 3.75, wy, 0.5, 8, frame); rectPx(b, wx, wy + 3.75, 8, 0.5, frame);
+      const sx = wx < 16 ? 23 : 2;
+      rectPx(b, sx, 9, 7, 0.5, frame);
+      let bx = sx;
+      while (bx < sx + 6.5) {
+        const w = 0.5 + R.int(2) * 0.5, h = 2 + R.int(3) * 0.5;
+        rectPx(b, bx, 9 - h, w, h, hex(R.pick(["#d1495b", "#2d62ff", "#034f46", "#ffb627", "#7f1c34", "#8a6bd1"])));
+        bx += w;
+      }
+      const px = wx < 16 ? 27 : 3;
+      rectPx(b, px - 1, 20, 3, 3, hex("#c96a3d")); rectPx(b, px - 1.5, 20, 4, 0.5, hex("#b05a30"));
+      [[0, -1], [-1, -2], [1, -2], [0, -3], [-1.5, -1], [1.5, -1]].forEach(([dx, dy]) => setPx(b, px + dx, 20 + dy, hex(dy % 2 ? "#3fa04a" : "#2f8a3e")));
+      const rug = hex(R.pick(["#d1495b", "#2d62ff", "#ffb627", "#8a6bd1"]));
+      for (let fy = 26 * S; fy < 31 * S; fy++) for (let fx = 0; fx < FINE; fx++) {
+        const dx = (fx - 32) / 26, dy = (fy - 28.5 * S) / 5;
+        if (dx * dx + dy * dy <= 1) fineSet(b, fx, fy, Math.floor(Math.sqrt(dx * dx + dy * dy) * 4) % 2 ? rug : mix(rug, 0xffffff, 0.4));
+      }
+      if (night) {
+        for (let i = 0; i < b.length; i++) b[i] = mix(b[i], hex("#241c3d"), 0.35);
+        const lx = (sx + 3.5) * S, ly = 6 * S;
+        for (let fy = 0; fy < FINE; fy++) for (let fx = 0; fx < FINE; fx++) {
+          const d = Math.hypot(fx - lx, fy - ly);
+          if (d < 22) fineBlend(b, fx, fy, hex("#ffcf7a"), 0.35 * (1 - d / 22));
+        }
+      }
+      return { base: b, anim: null };
+    },
+  },
+  {
+    key: "storm", name: "Thunderstorm", mood: "negative", particle: "rain",
+    words: ["stormy", "thunder", "brooding", "tempest", "raging", "electric"],
+    bodies: ["#ffd166", "#8fd3ff", "#c9a0ff", "#ff9ecd", "#7cf7d4", "#f2f2f2"],
+    accents: ["#ffd166", "#ffffff", "#7fd4ff", "#ff3d5a"],
+    bg(R) {
+      const b = newBuf();
+      gradient(b, ["#101219", "#1a1e2b", "#262c3d", "#323a50"], 0, 23);
+      const ph = R.next() * 6;
+      for (let fx = 0; fx < FINE; fx++) {
+        const x = fx / S, bot = (5 + Math.sin(x * 0.45 + ph) * 1.5 + Math.sin(x * 0.17) * 1.2) * S;
+        for (let fy = 0; fy < bot; fy++) fineSet(b, fx, fy, hex(fy > bot - 2 ? "#3a4258" : "#1b202c"));
+      }
+      gradient(b, ["#1c2a3a", "#152230", "#0f1924"], 24, 31);
+      for (let i = 0; i < 20; i++) rectPx(b, R.int(GRID), 24 + R.int(8), 1 + R.int(2), 0.5, hex("#2d4258"));
+      const lx = sideX(R, 2);
+      rectPx(b, lx, 16, 2, 8, hex("#e8e8e8")); rectPx(b, lx, 18, 2, 1, hex("#d1495b")); rectPx(b, lx, 21, 2, 1, hex("#d1495b"));
+      rectPx(b, lx - 0.5, 15, 3, 1, hex("#2a2f3a")); rectPx(b, lx, 14, 2, 1, hex("#ffd166")); rectPx(b, lx - 2, 24, 6, 1, hex("#1a1f28"));
+      const boltX = sideX(R, 4), period = 110 + R.int(80), phase = R.int(period), bolt = [];
+      let x = boltX;
+      for (let y = 5; y < 22; y++) { bolt.push([x, y]); if (R.chance(0.5)) x += R.chance(0.5) ? -1 : 1; }
+      return {
+        base: b,
+        anim(fb, t) {
+          const dir = Math.cos(t * 0.03);
+          for (let i = 1; i < 10; i++) blendPx(fb, lx + 0.5 + dir * i, 14, hex("#fff3b0"), 0.3 * (1 - i / 10) * Math.abs(dir));
+          const f = mod(t + phase, period);
+          if (f < 7) {
+            const a = f < 2 ? 0.45 : f < 4 ? 0.1 : 0.3;
+            for (let i = 0; i < fb.length; i++) fb[i] = mix(fb[i], 0xdfe8ff, a);
+            bolt.forEach(([bx, by]) => { setPx(fb, bx, by, 0xffffff); dotPx(fb, bx + 1, by, hex("#bcd2ff")); });
+          }
+        },
+      };
+    },
+  },
+  {
+    key: "jungle", name: "Jungle", mood: "neutral", particle: "fireflies",
+    words: ["wild", "tropical", "jungle", "vine", "tiger", "canopy"],
+    bodies: ["#ff8c5a", "#ffd166", "#ff7eb6", "#8fd3ff", "#c9a0ff", "#ffffff"],
+    accents: ["#ff3d5a", "#ffd166", "#ffffff", "#2d62ff"],
+    bg(R) {
+      const b = newBuf();
+      gradient(b, ["#2c7a4b", "#1f6a40", "#155a36", "#0f4a2c"]);
+      for (let x = 0; x < GRID; x += 1) if (mod(x * 5, 9) < 2) for (let y = 0; y < 26; y++) blendPx(b, x + y * 0.2, y, hex("#bfffc8"), 0.06);
+      const greens = ["#2f9e5b", "#3fbf6a", "#1f7a45", "#58c46a"];
+      for (let i = 0; i < 10; i++) {
+        const left = i % 2 === 1, x = left ? R.int(7) : 25 + R.int(7), y = 4 + R.int(24);
+        leafShape(b, x, y, left ? 1 : -1, hex(R.pick(greens)));
+      }
+      fineGround(b, 27, hex("#0d3322"), hex("#123d28"));
+      for (let i = 0; i < 4; i++) {
+        const x = sideX(R, 1), y = 27 + R.int(3);
+        discPx(b, x, y, 1, hex(R.pick(["#ff5d8f", "#ffb627", "#ff7a3d"]))); dotPx(b, x + 0.25, y + 0.25, hex("#ffe066"));
+      }
+      const vines = [];
+      for (let i = 0; i < 5; i++) vines.push({ x: R.int(GRID), len: 5 + R.int(10), ph: R.next() * 6 });
+      return {
+        base: b,
+        anim(fb, t) {
+          vines.forEach((v) => {
+            for (let j = 0; j < v.len * S; j++) {
+              const y = j / S, sway = Math.sin(t * 0.03 + v.ph + y * 0.25) * (y / v.len) * 1.2;
+              dotPx(fb, v.x + sway, y, hex("#2a6e2f"));
+              if (j % 5 === 0) dotPx(fb, v.x + sway + 0.5, y, hex("#4caf50"));
+            }
+          });
+        },
+      };
+    },
+  },
 ];
 
 /* ---------------------------------------------------------------------
@@ -517,6 +943,7 @@ const sentimentReady = new Promise((resolve) => {
 const MOOD_EXTRAS = {
   chilling: 2, chill: 2, chilled: 2, vibe: 1, vibes: 2, vibing: 2, susegad: 3, beach: 1, sunset: 1, cozy: 2,
   lit: 2, dope: 2, fire: 0, sick: 0, killing: 0, slay: 2, slaying: 2, homesick: -2, rainy: -1, monday: -1,
+  grumpy: -2, moody: -1, sleepy: 0, debugging: 0, cute: 2, adorable: 3, chilling: 2,
 };
 const FALLBACK_LEXICON = {
   love: 3, happy: 3, joy: 3, sunny: 2, great: 3, fun: 2, awesome: 3, cute: 2, sweet: 2, yay: 3, smile: 2,
@@ -553,13 +980,25 @@ const KEYWORDS = {
   theme: {
     haunted: "haunted haunt spooky halloween midnight moon bat bats grave witch creepy castle scary horror ghostly night",
     happy: "sunny sun flower flowers garden meadow picnic spring bloom daisy smile morning sunshine",
-    sad: "rain rainy storm stormy gloomy grey gray cry crying tears lonely monday miss",
+    sad: "rain rainy gloomy grey gray cry crying tears lonely monday miss sad",
     scifi: "space star stars planet planets galaxy rocket cosmic astronaut orbit universe nasa",
-    cyberpunk: "neon city cyber cyberpunk hacker hackers hack hacking code coding glitch 3am street streets synth arcade",
+    cyberpunk: "neon city cyber cyberpunk glitch 3am street streets synth nightlife downtown metro",
     hydro: "ocean sea deep wave waves abyss water whale shark dive diving",
     forest: "reef coral kelp fish lagoon aquarium mermaid turtle snorkel snorkeling",
     candy: "candy cake sweet sweets sugar birthday sprinkle sprinkles chocolate dessert icecream lollipop donut party",
-    goa: "goa goan beach sunset baga calangute anjuna palm coconut susegad feni vacation holiday sand",
+    goa: "goa goan beach sunset baga calangute anjuna palm susegad feni vacation holiday",
+    snow: "snow snowy winter ice icy frozen mountain mountains ski skiing himalaya himalayas manali shimla",
+    desert: "desert dune dunes sahara camel dry rajasthan jaisalmer sand",
+    volcano: "volcano volcanoes lava magma eruption angry furious rage mad burning",
+    autumn: "autumn fall leaf leaves maple october harvest",
+    sakura: "sakura cherry blossom blossoms japan tokyo kyoto zen",
+    backwaters: "kerala backwater backwaters houseboat alleppey alappuzha kochi kumarakom river boat monsoon coconut",
+    aurora: "aurora northern lights polar arctic iceland norway lapland",
+    arcade: "arcade retro 8bit game games gaming gamer level boss console nintendo",
+    matrix: "hacker hackers hack hacking hackathon terminal linux matrix binary sudo bug bugs debug debugging python javascript code coding programmer developer",
+    room: "home room bedroom bed lofi nap netflix tea coffee indoors weekend",
+    storm: "storm stormy thunder thunderstorm lightning tempest hurricane cyclone",
+    jungle: "jungle rainforest tropical wild tiger monkey vines amazon forest",
   },
   type: {
     cat: "cat cats kitty kitten meow", fox: "fox foxy", owl: "owl owls wise study studying",
@@ -567,6 +1006,13 @@ const KEYWORDS = {
     robot: "robot robots ai bot bots tech machine computer android code coding",
     slime: "slime goo blob jelly", alien: "alien aliens ufo martian", dragon: "dragon dragons fire flame dino",
     monster: "monster monsters beast rawr", vamp: "vampire vamp dracula blood fangs",
+    penguin: "penguin penguins antarctica", panda: "panda pandas bamboo", bear: "bear bears teddy hug hugs",
+    puppy: "dog dogs puppy puppies pup doggo woof", duck: "duck ducks quack duckling",
+    mushroom: "mushroom mushrooms shroom fungi", cactus: "cactus cacti plant plants succulent",
+    octopus: "octopus kraken tentacle tentacles squid", axolotl: "axolotl axolotls",
+    ninja: "ninja ninjas stealth samurai", astronaut: "astronaut astronauts cosmonaut spaceman rocket",
+    wizard: "wizard wizards magic spell sorcerer mage potion", skeleton: "skeleton skeletons bones skull",
+    pumpkin: "pumpkin pumpkins halloween jack", elephant: "elephant elephants kerala tusker jumbo",
   },
   color: {
     red: "#ff4d4d", orange: "#ff9f43", yellow: "#ffd93d", green: "#6bdc6b", blue: "#4da3ff", purple: "#a06bff",
@@ -578,6 +1024,8 @@ const KEYWORDS = {
     headphones: "music song songs dj headphones beats vibe vibes dance dancing",
     glasses: "glasses nerd nerdy exam exams read reading book books smart geek",
     scarf: "scarf winter cold snow cozy chilly",
+    bow: "bow cute ribbon kawaii adorable", flowers: "rose roses floral bouquet garland",
+    cap: "cap sports cricket football baseball skate skater gym", mustache: "mustache moustache dad uncle papa",
   },
 };
 const KEYWORD_INDEX = (() => { // word -> [{kind, key}]
@@ -616,9 +1064,10 @@ function pickTheme(R, mood, hints) {
     return w;
   });
   // your words win: if any theme word matched, only matched themes can be picked
+  // the scene(s) with the most matching words win
   const matched = THEMES.map((t) => hints.count.theme[t.key] || 0);
-  const anyMatch = matched.some((m) => m > 0);
-  return R.weighted(THEMES, anyMatch ? weights.map((w, i) => w * matched[i]) : weights);
+  const best = Math.max(...matched);
+  return R.weighted(THEMES, best > 0 ? weights.map((w, i) => (matched[i] === best ? w : 0)) : weights);
 }
 
 /* ---------------------------------------------------------------------
@@ -675,6 +1124,66 @@ const TYPES = [
     "........", "........", "...HHHHH", "..HHHHHH", ".HHHHHHH", ".HBBBBHH", ".BBBBBBB", ".BBBBBBB",
     ".BBBBBBB", ".BBBBBBB", "C.BBBBBB", "CC.BBBBB", "CCCKLLLL", "CCCKKLLL", "CCCKKKLL", "CCCKKKKA",
     ".CCKKKKK", "..KK...."] },
+  { key: "penguin", name: "penguin", eye: [4, 7], mouth: 11, headTop: 3, neck: 11, noMouth: true, tpl: [
+    "........", "........", "........", "....BBBB", "...BBBBB", "..BBBBBB", "..BBWWWW", ".BBWWWWW",
+    ".BBWWWWW", ".BBWWWOO", ".BBWWWWO", "BBBWWWWW", "BBBWWWWW", "BBBWWWWW", ".BBWWWWW", ".BBWWWWW",
+    "..BBWWWW", "...OO..."] },
+  { key: "panda", name: "panda", eye: [2, 7], mouth: 10, headTop: 3, neck: 12, eyes: ["wide", "glow"], shade: "W", tpl: [
+    "........", "........", ".KK.....", ".KKWWWWW", "..WWWWWW", ".WWWWWWW", "WWKKWWWW", "WKKKWWWW",
+    "WKKKWWWW", "WWKWWWWK", "WWWWWWWW", ".WWWWWWW", "..KKKKKK", "KKKWWWWW", "KKKWWWWW", ".KKWWWWW",
+    "..WWWWWW", "..KKK..."] },
+  { key: "bear", name: "bear", eye: [2, 6], mouth: 10, headTop: 4, neck: 12, tpl: [
+    "........", "........", ".BB.....", ".BAB....", ".BBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB",
+    "BBBBBLLL", "BBBBLLLK", "BBBBLLLL", ".BBBBLLL", "..BBBBBB", ".BBBLLLL", "BBBLLLLL", "BBBLLLLL",
+    ".BBBBBBB", ".DDD...."] },
+  { key: "puppy", name: "puppy", eye: [3, 7], mouth: 11, headTop: 3, neck: 12, tpl: [
+    "........", "........", "........", "...BBBBB", "..BBBBBB", "DDBBBBBB", "DDBBBBBB", "DDBBBBBB",
+    "DDBBBBBB", "DDBBBLLL", ".DBBLLLK", "..BBLLLL", "...BBBBB", "..BBBLLL", "..BBBLLL", "..BBBLLL",
+    "..BBBBBB", "..LLL..."] },
+  { key: "duck", name: "duck", eye: [3, 6], mouth: 10, headTop: 4, neck: 11, tpl: [
+    "........", "........", ".......B", ".....BBB", "...BBBBB", "..BBBBBB", "..BBBBBB", "..BBBBBB",
+    "..BBBBOO", "..BBBOOO", "...BBBBB", "....BBBB", "..BBBBBB", ".BBBBBBB", "BBDBBBBB", "BBDBBBBB",
+    ".BBBBBBB", "...OO..."] },
+  { key: "mushroom", name: "mushroom", eye: [3, 9], mouth: 12, headTop: 1, neck: 14, tpl: [
+    "........", "....BBBB", "..BBBBBB", ".BBWWBBB", "BBBWWBBB", "BBBBBBWW", "BBBBBBWW", "DDDDDDDD",
+    "..LLLLLL", "..LLLLLL", "..LLLLLL", "..LLLLLL", "..LLLLLL", "...LLLLL", "...LLLLL", "...LLLLL",
+    "..LLLLLL", "..DDD..."] },
+  { key: "cactus", name: "cactus", eye: [4, 6], mouth: 9, headTop: 3, neck: 14, tpl: [
+    "........", "........", "......AA", "....BBBB", "...BBBBB", "...BBDBB", "...BBDBB", "...BBDBB",
+    "B..BBBBB", "B..BBBBB", "BB.BBBBB", ".BBBBBBB", "...BBBBB", "...BBDBB", "...BBBBB", "..CCCCCC",
+    "..CCCCCC", "...CCCCC"] },
+  { key: "octopus", name: "octopus", eye: [3, 8], mouth: 11, headTop: 3, neck: 12, tpl: [
+    "........", "........", "........", "....BBBB", "..BBBBBB", ".BBBBBBB", ".BBLBBBB", "BBBBBBBB",
+    "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", ".BBBBBBB", "BBBBBBBB", "BB.BB.BB", "BB.BB.BB",
+    ".B.BB.B.", ".D..D..."] },
+  { key: "axolotl", name: "axolotl", eye: [3, 7], mouth: 10, headTop: 4, neck: 12, tpl: [
+    "........", "........", "........", "A.......", "AA.BBBBB", ".AABBBBB", "AABBBBBB", ".ABBBBBB",
+    "AABBBBBB", "..BBBBBB", "..BBBBBB", "...BBBBB", "...LLLLL", "..BBLLLL", ".BBBLLLL", "..BBLLLL",
+    "...BBBBB", "..BB...."] },
+  { key: "ninja", name: "ninja", eye: [3, 6], mouth: 10, headTop: 2, neck: 11, noMouth: true, eyes: ["round", "shine", "dot", "big"], shade: "H", tpl: [
+    "........", "........", "...HHHHH", "..HHHHHH", ".HHHHHHH", ".AAAAAAA", ".HSSSSSS", ".HSSSSSS",
+    ".HSSSSSS", ".HHHHHHH", ".HHHHHHH", "..HHHHHH", "...HHHHH", "..HHHHHH", ".HHHHHHH", ".HHAAAAA",
+    "..HHHHHH", "..HH...."] },
+  { key: "astronaut", name: "astronaut", eye: [3, 7], mouth: 9, headTop: 2, neck: 11, shade: "W", tpl: [
+    "........", "........", "....WWWW", "..WWWWWW", ".WWWWWWW", ".WWSSSSS", "WWSSSSSS", "WWSSSSSS",
+    "WWSSSSSS", "WWSSSSSS", ".WWSSSSS", ".WWWWWWW", "..WWWWWW", ".WWWWWWW", "WWWWBABA", ".WWWWWWW",
+    "..WWWWWW", "..DDD..."] },
+  { key: "wizard", name: "wizard", eye: [3, 7], mouth: 9, headTop: 5, neck: 15, noHead: true, tpl: [
+    ".......B", "......BB", ".....BBB", "....BBBA", "...BBBBB", ".BBBBBBB", "..SSSSSS", "..SSSSSS",
+    "..SSSSSS", "..WSSSSS", "..WWWWWW", ".BWWWWWW", ".BBWWWWW", "BBBBWWWW", "BBBBBBWW", "BBBBBBBB",
+    ".BBBBBBB", ".DDD...."] },
+  { key: "skeleton", name: "skeleton", eye: [3, 6], mouth: 10, headTop: 2, neck: 12, noMouth: true, eyes: ["glow"], shade: "W", tpl: [
+    "........", "........", "....WWWW", "..WWWWWW", ".WWWWWWW", ".WWWWWWW", ".WKKKKWW", ".WKKKKWW",
+    ".WWKKWWW", ".WWWWWKW", "..WWWWWW", "...WKWKW", "....WWWW", "...WWWWW", "..W.W.WW", "..W.W.WW",
+    "...WWWWW", "...WW..."] },
+  { key: "pumpkin", name: "pumpkin", eye: [3, 8], mouth: 11, headTop: 4, neck: 14, eyes: ["glow", "round", "shine"], tpl: [
+    "........", "........", "......VV", "......VV", "..BBBBBB", ".BBDBBDB", "BBBDBBDB", "BBBDBBDB",
+    "BBBDBBDB", "BBBDBBDB", "BBBDBBDB", "BBBDBBDB", "BBBDBBDB", "BBBDBBDB", ".BBDBBDB", "..BBBBBB",
+    "...DD...", "........"] },
+  { key: "elephant", name: "elephant", eye: [4, 6], mouth: 10, headTop: 3, neck: 13, noMouth: true, tpl: [
+    "........", "........", "........", "...BBBGG", ".DDBBBBB", "DDDBBBBB", "DDDBBBBB", "DDDBBBBB",
+    "DDDBBBBB", ".DDBBBBB", "..DBBWBB", "....BDBB", "..BBBDBB", "..BBBBBB", ".BBBBBBB", ".BBBBBBB",
+    ".BBBBBBB", ".DD..DD."] },
 ];
 
 // Eye styles at fine resolution (4 x 4, left eye; right eye is mirrored)
@@ -687,7 +1196,10 @@ const EYE_STYLES = {
   shine: [".KK.", "KKWK", "KKKK", "WKK."],
 };
 const BLINK_EYE = ["....", "....", "K..K", ".KK."];
-const ACCESSORIES = ["hat", "crown", "headphones", "glasses", "scarf", "none"];
+const ACCESSORIES = ["hat", "crown", "headphones", "glasses", "scarf", "bow", "flowers", "cap", "mustache", "none"];
+const HEAD_ACCESSORIES = ["hat", "crown", "headphones", "bow", "flowers", "cap"];
+// extra vivid colours so characters are not limited to each scene's palette
+const GLOBAL_BODIES = ["#ff6b6b", "#ff9f43", "#ffd93d", "#6bdc6b", "#2ec4b6", "#4da3ff", "#7b6bff", "#c56bff", "#ff6bd6", "#ff8fa3", "#a3e635", "#38bdf8", "#f472b6", "#fbbf24", "#e2e8f0", "#94a3b8"];
 
 // Sprite working buffer (layout units): template (16x18) sits at (OX, OY)
 // so hats and outlines have room. It is smoothed 2x into a fine sprite and
@@ -697,11 +1209,21 @@ const SW = 24, SH = 26, OX = 4, OY = 5, SPR_X = 4, SPR_Y = 2;
 const FW = SW * S, FH = SH * S;
 const INK = hex("#1a1423"), OUTLINE = hex("#07050b"), WHITE = hex("#f7f3ea");
 
-function symbolColors(type, body, accent) {
+function symbolColors(type, body, accent, hinted) {
   const c = {
     B: body, D: mix(body, 0x000000, 0.35), L: mix(body, 0xffffff, 0.55), A: accent,
     W: WHITE, K: INK, H: mix(body, 0x0b0612, 0.82), C: mix(hex("#6a0d2b"), accent, 0.25),
+    O: hex("#ff9f2e"), S: hex("#f2c9a0"), G: hex("#ffcc33"), V: hex("#3f8a3a"),
   };
+  const tint = (base, amt) => (hinted ? body : mix(body, hex(base), amt));
+  if (type.key === "penguin") { c.B = mix(body, hex("#1d2333"), hinted ? 0.35 : 0.72); c.D = mix(c.B, 0x000000, 0.3); }
+  if (type.key === "mushroom") { c.L = hex("#f5e6c8"); c.D = mix(hex("#f5e6c8"), 0x000000, 0.25); }
+  if (type.key === "cactus") { c.B = tint("#3fa34d", 0.75); c.D = mix(c.B, 0x000000, 0.3); c.C = hex("#c96a3d"); }
+  if (type.key === "pumpkin") { c.B = tint("#ff8c2e", 0.75); c.D = mix(c.B, 0x000000, 0.25); }
+  if (type.key === "elephant") { c.B = tint("#9aa3b5", 0.6); c.D = mix(c.B, 0x000000, 0.22); }
+  if (type.key === "astronaut") { c.D = hex("#9aa0b5"); }
+  if (type.key === "ninja") { c.H = mix(body, hex("#0b0612"), 0.72); }
+  if (type.key === "wizard") { c.B = mix(body, hex("#3b2a8a"), hinted ? 0.2 : 0.45); c.D = mix(c.B, 0x000000, 0.3); c.A = hex("#ffd93d"); }
   if (type.key === "ghost") { c.B = mix(body, 0xffffff, 0.68); c.D = mix(c.B, body, 0.5); c.L = 0xffffff; }
   if (type.key === "vamp") { c.B = mix(body, hex("#f4e8ee"), 0.78); c.L = WHITE; }
   return c;
@@ -732,13 +1254,14 @@ function keywordWeights(keys, counts) {
 
 function buildCharacter(R, theme, hints) {
   const type = R.weighted(TYPES, keywordWeights(TYPES.map((t) => t.key), hints.count.type));
-  const pickedBody = hex(R.pick(theme.bodies));
+  const wildColour = R.chance(0.3);
+  const pickedBody = hex(wildColour ? R.pick(GLOBAL_BODIES) : R.pick(theme.bodies));
   const body = hints.color ?? pickedBody;                         // "red" paints it red
   const accentChoices = theme.accents.filter((a) => hex(a) !== body);
   const accent = hex(R.pick(accentChoices));
   const eyeStyle = R.pick(type.eyes || Object.keys(EYE_STYLES));
   const accessory = R.weighted(ACCESSORIES, keywordWeights(ACCESSORIES, hints.count.accessory));
-  const colors = symbolColors(type, body, accent);
+  const colors = symbolColors(type, body, accent, !!hints.color);
 
   const base = new Int32Array(SW * SH).fill(-1);
   const put = (x, y, c) => { // template coords, mirrored automatically
@@ -757,7 +1280,22 @@ function buildCharacter(R, theme, hints) {
   });
 
   const [, ey] = type.eye, hT = type.headTop;
-  if (accessory === "hat") {
+  const skipHead = type.noHead && HEAD_ACCESSORIES.includes(accessory);
+  if (skipHead) {
+    // wizards already wear a hat
+  } else if (accessory === "bow") {
+    const bow = mix(accent, hex("#ff5c8a"), 0.6);
+    put(3, hT - 1, bow); put(5, hT - 1, bow); put(3, hT, bow); put(4, hT, mix(bow, 0x000000, 0.3)); put(5, hT, bow);
+  } else if (accessory === "flowers") {
+    [[3, "#ffffff"], [5, "#ffd93d"], [7, "#ff7eb6"]].forEach(([x, c]) => put(x, hT - 1, hex(c)));
+    [4, 6].forEach((x) => put(x, hT - 1, hex("#3fa04a")));
+  } else if (accessory === "cap") {
+    const capC = accent, brim = mix(accent, 0x000000, 0.3);
+    for (let x = 5; x <= 7; x++) put(x, hT - 2, capC);
+    for (let x = 4; x <= 7; x++) put(x, hT - 1, capC);
+    for (let x = 3; x <= 7; x++) put(x, hT, brim);
+    put(7, hT - 3, brim);
+  } else if (accessory === "hat") {
     const hat = hex("#1d1726");
     for (let x = 4; x <= 7; x++) put(x, hT - 1, hat);
     for (let y = hT - 4; y <= hT - 2; y++) for (let x = 5; x <= 7; x++) put(x, y, y === hT - 2 ? accent : hat);
@@ -786,9 +1324,10 @@ function buildCharacter(R, theme, hints) {
   const fine = scale2x(base, SW, SH);
   const shaded = Int32Array.from(fine);
   const fat = (x, y) => (x < 0 || y < 0 || x >= FW || y >= FH ? -1 : fine[y * FW + x]);
-  const hi = mix(colors.B, 0xffffff, 0.32), lo = mix(colors.B, 0x000000, 0.2);
+  const shadeC = colors[type.shade || "B"];
+  const hi = mix(shadeC, 0xffffff, 0.32), lo = mix(shadeC, 0x000000, 0.2);
   for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
-    if (fine[y * FW + x] !== colors.B) continue;
+    if (fine[y * FW + x] !== shadeC) continue;
     if (fat(x, y - 1) === -1) shaded[y * FW + x] = hi;                       // rim light on top edges
     else if (fat(x, y + 1) === -1 || fat(x, y + 2) === -1) shaded[y * FW + x] = lo; // shade underneath
   }
@@ -829,8 +1368,17 @@ function drawCharacter(fb, scene, t, still) {
     }
   });
 
-  // cheeks + mouth follow the mood
-  if (mood === "positive") {
+  // cheeks + mouth follow the mood (masks, beaks and trunks hide the mouth)
+  const showMouth = !type.noMouth;
+  if (!showMouth) {
+    if (mood === "positive") {
+      const blush = mix(ch.body, hex("#ff5c8a"), 0.55);
+      for (let dx = -1; dx <= 1; dx++) if (at(ex + dx, ey + 5) !== -1) put(ex + dx, ey + 5, blush);
+    } else if (mood === "negative") {
+      const drop = still ? 0 : Math.floor(t / 5) % 5, tear = hex("#7fd4ff");
+      put(ex + 1, ey + 4 + drop, tear); put(ex + 1, ey + 5 + drop, mix(tear, 0xffffff, 0.45));
+    }
+  } else if (mood === "positive") {
     const blush = mix(ch.body, hex("#ff5c8a"), 0.55);
     for (let dx = -1; dx <= 1; dx++) if (at(ex + dx, ey + 5) !== -1) put(ex + dx, ey + 5, blush);
     put(12, my, INK); put(13, my + 1, INK); put(14, my + 2, INK); put(15, my + 2, INK);
@@ -843,7 +1391,12 @@ function drawCharacter(fb, scene, t, still) {
   } else {
     put(13, my + 1, INK); put(14, my + 1, INK); put(15, my + 1, INK);
   }
-  if (type.fangs && mood !== "negative") { put(13, my + 2, WHITE); put(13, my + 3, WHITE); }
+  if (showMouth && type.fangs && mood !== "negative") { put(13, my + 2, WHITE); put(13, my + 3, WHITE); }
+  if (showMouth && ch.accessory === "mustache") {
+    const m = hex("#3a2614");
+    for (let x = 11; x <= 15; x++) put(x, my - 1, m);
+    put(13, my - 2, m); put(14, my - 2, m); put(15, my - 2, m); put(10, my - 2, m);
+  }
 
   // glasses sit on top of the eyes
   if (ch.accessory === "glasses") {
@@ -867,7 +1420,7 @@ function drawCharacter(fb, scene, t, still) {
    --------------------------------------------------------------------- */
 function initParticles(kind, R) {
   const P = [];
-  const n = { rain: 38, bats: 4, stars: 18, bubbles: 14, petals: 16, neonrain: 26, sprinkles: 22, gulls: 4 }[kind] || 0;
+  const n = { rain: 38, bats: 4, stars: 18, bubbles: 14, petals: 16, neonrain: 26, sprinkles: 22, gulls: 4, snow: 42, sand: 30, embers: 26, leaves: 14, glints: 18, blocks: 6, code: 34, dust: 18, fireflies: 12 }[kind] || 0;
   for (let i = 0; i < n; i++) {
     P.push({
       x: R.next() * GRID, y: R.next() * 40, sp: R.next(), ph: R.next() * 6.283,
@@ -903,6 +1456,64 @@ function drawParticles(fb, scene, t) {
         const y = 2 + (p.y % 10) + Math.round(Math.sin(t * 0.03 + p.ph));
         const frame = Math.floor((t + p.ph * 10) / 9) % 2 ? GULL_UP : GULL_DOWN;
         frame.forEach((row, j) => { for (let i = 0; i < 5; i++) if (row[i] === "X") setPx(fb, x + i, y + j, hex("#3a2340")); });
+        break;
+      }
+      case "snow": {
+        const y = mod(p.y + t * (0.04 + p.sp * 0.08), 38) - 3;
+        const x = mod(p.x + Math.sin(t * 0.02 + p.ph) * 1.5, GRID);
+        if (p.size === 2) setPx(fb, x, y, 0xffffff); else dotBlend(fb, x, y, 0xffffff, 0.9);
+        break;
+      }
+      case "sand": {
+        const x = mod(p.x + t * (0.15 + p.sp * 0.25), GRID + 4) - 2;
+        const y = 17 + (p.y % 14) + Math.sin(t * 0.05 + p.ph) * 0.5;
+        dotBlend(fb, x, y, hex("#fff1c8"), 0.75); dotBlend(fb, x - 0.5, y, hex("#fff1c8"), 0.35);
+        break;
+      }
+      case "embers": {
+        const y = 31 - mod(p.y * 0.8 + t * (0.06 + p.sp * 0.12), 34);
+        const x = p.x + Math.sin(t * 0.04 + p.ph) * 1.2;
+        dotPx(fb, x, y, mix(hex("#ff4a00"), hex("#ffd23a"), (Math.sin(t * 0.3 + p.ph) + 1) / 2));
+        break;
+      }
+      case "leaves": {
+        const sp = 0.08 + p.sp * 0.1;
+        const y = mod(p.y + t * sp, 38) - 3;
+        const x = mod(p.x - t * sp * 0.5 + Math.sin(t * 0.035 + p.ph) * 2.5, GRID);
+        const c = hex(["#e8572e", "#f2a33a", "#ffcf3a", "#c93a2a"][p.c]);
+        dotPx(fb, x, y, c); dotPx(fb, x + 0.5, y + 0.5, c);
+        if (Math.floor(t / 12 + p.ph) % 2) dotPx(fb, x + 0.5, y, mix(c, 0x000000, 0.2)); else dotPx(fb, x, y + 0.5, mix(c, 0x000000, 0.2));
+        break;
+      }
+      case "glints": {
+        const x = p.x, y = 20 + (p.y % 11);
+        const v = Math.sin(t * (0.05 + p.sp * 0.05) + p.ph);
+        if (v > 0.55) dotBlend(fb, x, y, 0xffffff, (v - 0.55) * 2);
+        if (v > 0.9) { dotBlend(fb, x - 0.5, y, 0xffffff, 0.5); dotBlend(fb, x + 0.5, y, 0xffffff, 0.5); }
+        break;
+      }
+      case "blocks": {
+        const y = mod(p.y + t * (0.04 + p.sp * 0.05), 40) - 4;
+        block(fb, Math.floor(p.x / 2) * 2, Math.floor(y * 2) / 2, hex(["#ff3d7f", "#3dc1ff", "#ffe14d", "#7cf7a8"][p.c]));
+        break;
+      }
+      case "code": {
+        const x = Math.floor(p.x * 2) / 2, y = mod(p.y + t * (0.15 + p.sp * 0.3), 44) - 4, len = 5 + p.c * 2;
+        dotPx(fb, x, y, hex("#d4ffcc"));
+        for (let k = 1; k < len; k++) if (mod(k + Math.floor(t / 4 + p.ph * 3), 5) !== 0) dotBlend(fb, x, y - k * 0.5, hex("#1fdc5a"), 0.9 * (1 - k / len));
+        break;
+      }
+      case "dust": {
+        const x = mod(p.x + Math.sin(t * 0.01 + p.ph) * 2 + t * 0.005, GRID);
+        const y = mod(p.y * 0.6 + Math.cos(t * 0.012 + p.ph) * 2, 24);
+        dotBlend(fb, x, y, hex("#fff6d8"), 0.3 + 0.3 * Math.sin(t * 0.05 + p.ph));
+        break;
+      }
+      case "fireflies": {
+        const x = p.x + Math.sin(t * 0.02 + p.ph) * 2, y = 8 + (p.y % 20) + Math.cos(t * 0.017 + p.ph * 1.3) * 1.5;
+        const v = (Math.sin(t * 0.08 + p.ph) + 1) / 2;
+        dotPx(fb, x, y, mix(hex("#3a5a20"), hex("#e8ff6a"), v));
+        if (v > 0.7) [[0.5, 0], [-0.5, 0], [0, 0.5], [0, -0.5]].forEach(([dx, dy]) => dotBlend(fb, x + dx, y + dy, hex("#e8ff6a"), 0.35));
         break;
       }
       case "stars": {
@@ -962,7 +1573,7 @@ const ADJECTIVES = {
   neutral:  ["curious", "tiny", "sneaky", "chill", "wobbly", "quiet", "fuzzy", "lucky", "zippy", "pixel"],
 };
 function makeName(R, theme, type, mood) {
-  const pool = R.chance(0.75) ? ADJECTIVES[mood.label] : ADJECTIVES[R.pick(["positive", "negative", "neutral"])];
+  const pool = R.chance(0.9) ? ADJECTIVES[mood.label] : ADJECTIVES[R.pick(["positive", "negative", "neutral"])];
   return `${R.pick(pool)} ${R.pick(theme.words)} ${type.name}`;
 }
 

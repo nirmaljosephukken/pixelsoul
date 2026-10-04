@@ -14,7 +14,7 @@ Pixel Soul turns one sentence into a one-of-a-kind, animated 64 × 64 pixel art 
 ## What it does
 
 - **Sentence to avatar.** Type or speak (mic button) a sentence and press **Generate**. Pixel Soul reads the words and mood of the sentence, picks a theme and a character, and draws a 64 × 64 pixel art scene on a 640 × 640 canvas (each art pixel is 10 × 10 screen pixels, smoothing off).
-- **9 themes**, each with its own palette, background and particles:
+- **21 scenes**, each with its own palette, background and particles:
   | Theme | Scene | Particles |
   |---|---|---|
   | Haunted | Purple night, full moon, graves, drifting fog | Flapping bats |
@@ -26,8 +26,20 @@ Pixel Soul turns one sentence into a one-of-a-kind, animated 64 × 64 pixel art 
   | Underwater Forest | Swaying kelp, sunbeams, coral, sand | Bubbles |
   | Candyland | Pink sky, lollipops, frosting hills, gumdrops | Sprinkles |
 | Goa Sunset | Purple-orange sunset, sea glints, palm tree, beach | Seagulls |
+| Snowy Peaks | Layered mountains, snowy pines | Snowfall |
+| Desert Dunes | Dunes, mesas, saguaro cactus (day or dusk) | Blowing sand |
+| Volcano | Glowing volcano, lava streams, cracked ground | Rising embers |
+| Autumn Woods | Orange and red trees, leafy ground | Falling leaves |
+| Sakura Garden | Cherry trees, snow-capped mountain, pond | Petals |
+| Kerala Backwaters | Coconut palms, houseboat, river (day or golden hour) | Water glints |
+| Aurora Night | Moving northern lights, snow, pines | Twinkling stars |
+| Retro Arcade | Block stacks, hearts and coins, scanlines | Falling blocks |
+| Hacker Terminal | Black-green terminal, blinking cursor | Code rain |
+| Cozy Room | Window (day or night), bookshelf, plant, rug, lamp glow | Floating dust |
+| Thunderstorm | Dark sea, lighthouse beam, lightning flashes | Rain |
+| Jungle | Big leaves, swaying vines, flowers | Fireflies |
 - **Your words steer it.** Keywords pick the scene (“beach” or “Goa” → Goa Sunset, “neon” or “coding” → Cyberpunk, “space” → Sci-Fi), the character (“cat”, “dragon”, “robot”, “vampire”…), the colour (“red”, “golden”, “purple”…) and the accessory (“king” → crown, “music” → headphones, “books” → glasses, “winter” → scarf). A **How your words shaped it** panel shows exactly which word did what.
-- **12 characters**: cat, fox, owl, frog, bunny, ghost, robot, slime, alien, mini dragon, monster, vamp. Each starts as a symbol template (left half, mirrored for perfect symmetry), is smoothed to double resolution with the Scale2x pixel art algorithm, then gets soft shading, detailed 4 × 4 eyes and a thin dark outline. The seed picks body color, eye style and an accessory (hat, crown, headphones, glasses, scarf or nothing).
+- **27 characters**: cat, fox, owl, frog, bunny, ghost, robot, slime, alien, mini dragon, monster, vamp, penguin, panda, bear, puppy, duck, mushroom, cactus, octopus, axolotl, ninja, astronaut, wizard, skeleton, pumpkin and elephant. Each starts as a symbol template (left half, mirrored for perfect symmetry), is smoothed to double resolution with the Scale2x pixel art algorithm, then gets soft shading, detailed 4 × 4 eyes and a thin dark outline. The seed picks body color, eye style and an accessory (hat, crown, headphones, glasses, scarf, bow, flower crown, cap, mustache or nothing). About a third of characters also get a "wild" colour from outside the scene's palette.
 - **Mood expressions.** Positive: smile and blush. Neutral: straight line. Negative: frown with falling tears.
 - **Animation.** The character bobs gently and blinks every few seconds while the theme particles move.
 - **Fun names** such as *Gloomy Neon Fox* or *Sparkly Moon Slime*, shown with the theme.
