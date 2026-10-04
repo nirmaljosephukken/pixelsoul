@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pixelso · Say a sentence, meet your pixel soul</title>
+  <meta name="description" content="Speak or type one sentence and get a one-of-a-kind seeded pixel art profile picture. Built by voice with Wispr Flow for Hacker House Goa 2026." />
+  <meta name="theme-color" content="#ffffeb" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Figtree:wght@400;500;600&family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- p5.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+  <!-- sentiment.js from CDN (bundled as an ES module by jsDelivr) -->
+  <script type="module">
+    try {
+      const mod = await import("https://cdn.jsdelivr.net/npm/sentiment@5.0.2/+esm");
+      window.Sentiment = mod.default || mod;
+    } catch (e) {
+      console.warn("sentiment.js failed to load, using built-in fallback lexicon", e);
+    }
+    window.dispatchEvent(new Event("sentiment-ready"));
+  </script>
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="./" aria-label="Pixelso home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-word">Pixelso</span>
+    </a>
+    <div class="nav-right">
+      <span class="pill pill-ghost">HH Goa ’26 × Wispr Flow</span>
+      <button id="settingsBtn" class="icon-btn" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <span class="pill pill-lav">Task 05 · Hacker House Goa × Wispr Flow</span>
+      <h1>Say a sentence.<br /><em>Meet your pixel soul.</em></h1>
+      <p class="lede">Speak or type how you feel. Pixelso hashes your words and the moment you said them into a seed, then paints a one-of-a-kind pixel character you can wear as your profile picture.</p>
+
+      <div class="composer">
+        <input id="sentence" type="text" maxlength="200" autocomplete="off"
+               placeholder="Sunset at Baga with my favourite people…" aria-label="Your sentence" />
+        <button id="micBtn" class="mic-btn hidden" type="button" aria-label="Speak your sentence" title="Speak your sentence">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+        </button>
+        <button id="generateBtn" class="btn btn-primary">Generate</button>
+      </div>
+
+      <div id="examples" class="examples" aria-label="Example sentences">
+        <button class="chip">Sunset at Baga with my favourite people</button>
+        <button class="chip">Midnight in a haunted castle, alone</button>
+        <button class="chip">Rainy Monday, I miss home</button>
+        <button class="chip">Racing through neon streets at 3am</button>
+        <button class="chip">Deep sea dreams with glowing fish</button>
+        <button class="chip">Birthday cake and sprinkles forever!</button>
+      </div>
+    </section>
+
+    <section class="studio" aria-label="Your avatar">
+      <div class="studio-head">
+        <div>
+          <div id="themeName" class="eyebrow">&nbsp;</div>
+          <h2 id="charName" class="char-name">Your pixel soul awaits</h2>
+          <p id="bio" class="bio hidden"></p>
+        </div>
+        <div class="seed-box" title="This code is the whole seed">
+          <span class="seed-label">Seed</span>
+          <span id="seedCode" class="seed-code">#------</span>
+        </div>
+      </div>
+
+      <div class="studio-body">
+        <div id="stage" class="stage"></div>
+
+        <aside class="side">
+          <div class="preview-wrap">
+            <canvas id="preview" width="160" height="160" aria-label="Circular profile picture preview"></canvas>
+            <span class="preview-label">How it looks as a profile picture</span>
+          </div>
+
+          <div class="actions">
+            <button id="downloadBtn" class="btn btn-primary btn-block">Download PFP</button>
+            <button id="shareBtn" class="btn btn-cream btn-block hidden">Share</button>
+            <div class="action-row">
+              <button id="rerollBtn" class="btn btn-ghost">Reroll</button>
+              <button id="copyLinkBtn" class="btn btn-ghost">Copy link</button>
+            </div>
+          </div>
+
+          <div class="toggles">
+            <label class="toggle">
+              <input id="stampToggle" type="checkbox" />
+              <span class="switch"></span>
+              <span>Name + seed stamp</span>
+            </label>
+            <label class="toggle">
+              <input id="bioToggle" type="checkbox" />
+              <span class="switch"></span>
+              <span>AI bio (Gemini)</span>
+            </label>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="gallery-block">
+      <div class="section-head">
+        <h3>Recent souls</h3>
+        <span class="muted">Saved in this browser · last 8</span>
+      </div>
+      <div id="gallery" class="gallery"><span class="empty">Your last 8 avatars show up here.</span></div>
+    </section>
+
+    <section class="how">
+      <div class="how-item">
+        <span class="how-num">01</span>
+        <h4>Speak it</h4>
+        <p>Your sentence plus the exact millisecond becomes a MurmurHash seed.</p>
+      </div>
+      <div class="how-item">
+        <span class="how-num">02</span>
+        <h4>Feel it</h4>
+        <p>Sentiment nudges the odds: happy words lean sunny, sad words lean rainy.</p>
+      </div>
+      <div class="how-item">
+        <span class="how-num">03</span>
+        <h4>Wear it</h4>
+        <p>Download a crisp 1080 px PNG or share a link that redraws the exact same soul.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <svg class="waves" viewBox="0 0 1200 60" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 30 Q 75 0 150 30 T 300 30 T 450 30 T 600 30 T 750 30 T 900 30 T 1050 30 T 1200 30 V60 H0Z" fill="#ffa946" opacity=".35"/>
+      <path d="M0 40 Q 75 15 150 40 T 300 40 T 450 40 T 600 40 T 750 40 T 900 40 T 1050 40 T 1200 40 V60 H0Z" fill="#034f46"/>
+    </svg>
+    <div class="footer-inner">
+      <div class="voice-badge" role="img" aria-label="Built entirely on voice with Wispr Flow">
+        <span class="voice-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+        <span>Built entirely on voice with <strong>Wispr Flow</strong></span>
+      </div>
+      <p class="footer-note">Made for Hacker House Goa 2026 · Task 05</p>
+    </div>
+  </footer>
+
+  <dialog id="settings" class="settings">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <p class="small">Your Gemini API key is stored only in this browser (localStorage) and sent only to Google's Gemini API.</p>
+      <label>Gemini API key
+        <input id="apiKey" type="password" autocomplete="off" placeholder="AIza..." />
+      </label>
+      <label>Gemini model
+        <input id="apiModel" type="text" autocomplete="off" placeholder="gemini-flash-latest" />
+      </label>
+      <div class="settings-actions">
+        <button id="clearKeyBtn" type="button" class="btn btn-ghost">Clear key</button>
+        <button id="saveKeyBtn" type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
