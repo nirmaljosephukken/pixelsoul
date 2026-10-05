@@ -1861,32 +1861,87 @@ function saveSettings() {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* ignore */ }
 }
 
+// Models to try, in order, if the chosen one doesn't exist for this key
+const FALLBACK_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-lite-latest"];
+
+// Turn Gemini's error replies into plain advice
+function explainGeminiError(status, err) {
+  const msg = (err && err.message) || "";
+  const reason = (err && (err.status || "")) + " " + msg;
+  if (/API_KEY_INVALID|API key not valid/i.test(reason)) return "Gemini says this API key isn't valid. Copy it again from Google AI Studio (aistudio.google.com) and paste it in Settings.";
+  if (status === 403 || /PERMISSION_DENIED/i.test(reason)) return "This key isn't allowed to call Gemini from this site. In Google AI Studio or Cloud Console, check the key has no website restriction blocking this page, and that the Generative Language API is enabled.";
+  if (status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(reason)) return "Your Gemini free quota is used up for now. Wait a minute and generate again.";
+  if (/FAILED_PRECONDITION|location is not supported|not available in your country/i.test(reason)) return "Gemini's API isn't available for this account or region. Try a key from a different Google account.";
+  if (status === 404) return "None of the Gemini models worked with this key. Try a model name like gemini-2.5-flash in Settings.";
+  return "Gemini couldn't write a bio (" + (status ? "error " + status + ": " : "") + msg.slice(0, 120) + ").";
+}
+
+async function askGemini(key, model, prompt) {
+  const models = [model, ...FALLBACK_MODELS.filter((m) => m !== model)];
+  let lastStatus = 0, lastErr = null;
+  for (const m of models) {
+    let res;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 1 } }),
+      });
+    } catch (e) {
+      return { ok: false, error: "Couldn't reach Gemini. Check your internet, and turn off any ad blocker or privacy extension blocking googleapis.com." };
+    }
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (res.ok) {
+      const cand = data && data.candidates && data.candidates[0];
+      const text = ((cand && cand.content && cand.content.parts) || []).filter((p) => !p.thought).map((p) => p.text || "").join(" ").trim();
+      const line = text.split("\n").map((l) => l.trim()).filter(Boolean)[0];
+      if (!line) return { ok: false, error: "Gemini replied but sent no text (it may have been blocked by its safety filter). Try a different sentence." };
+      return { ok: true, text: line.replace(/^["'“]|["'”]$/g, "").slice(0, 160), model: m };
+    }
+    lastStatus = res.status; lastErr = data && data.error;
+    if (res.status !== 404) break; // only a missing model is worth retrying with another
+  }
+  return { ok: false, error: explainGeminiError(lastStatus, lastErr) };
+}
+
 async function maybeFetchBio(sc) {
   const id = ++bioRequestId;
-  ui.bio.classList.add("hidden");
   const key = ui.apiKey.value.trim();
-  if (!ui.bioToggle.checked || !key) return;
+  ui.bio.classList.remove("bio-error", "bio-loading");
+  if (!ui.bioToggle.checked || !key) { ui.bio.classList.add("hidden"); return; }
+  ui.bio.textContent = "Writing a bio…";
+  ui.bio.classList.add("bio-loading");
+  ui.bio.classList.remove("hidden");
   const model = ui.apiModel.value.trim() || DEFAULT_MODEL;
   const prompt =
     `Write ONE funny, wholesome one-line bio (max 18 words, no hashtags, no quotes) for a pixel art character.\n` +
     `Name: ${sc.name}\nCharacter type: ${sc.character.type.name}\nTheme: ${sc.theme.name}\n` +
     `Mood: ${sc.mood.label}\nInspired by the sentence: "${sc.sentence}"`;
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 1 } }),
-    });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join(" ").trim();
-    const line = text.split("\n").map((l) => l.trim()).filter(Boolean)[0];
-    if (!line || id !== bioRequestId) throw new Error("empty or stale");
-    ui.bio.textContent = line.replace(/^["']|["']$/g, "").slice(0, 160);
-    ui.bio.classList.remove("hidden");
-  } catch (e) {
-    if (id === bioRequestId) ui.bio.classList.add("hidden"); // fail silently
+  const r = await askGemini(key, model, prompt);
+  if (id !== bioRequestId) return; // a newer avatar replaced this one
+  ui.bio.classList.remove("bio-loading");
+  if (r.ok) {
+    ui.bio.textContent = r.text;
+    if (r.model !== model) { ui.apiModel.value = r.model; saveSettings(); } // remember the model that worked
+  } else {
+    ui.bio.textContent = "AI bio: " + r.error;
+    ui.bio.classList.add("bio-error");
   }
+}
+
+async function testGeminiKey() {
+  const out = $("keyTest");
+  const key = ui.apiKey.value.trim();
+  if (!key) { out.textContent = "Paste a key first."; out.className = "key-test bad"; return; }
+  out.textContent = "Testing…"; out.className = "key-test";
+  const r = await askGemini(key, ui.apiModel.value.trim() || DEFAULT_MODEL, "Reply with exactly: Pixel Soul is ready!");
+  if (r.ok) {
+    out.textContent = "✓ Works with " + r.model + ". Turn on “AI bio” and generate.";
+    out.className = "key-test good";
+    if (r.model !== ui.apiModel.value.trim()) ui.apiModel.value = r.model;
+    saveSettings();
+  } else { out.textContent = r.error; out.className = "key-test bad"; }
 }
 
 /* ---------------------------------------------------------------------
@@ -1915,8 +1970,10 @@ ui.bioToggle.addEventListener("change", () => {
 document.querySelectorAll(".chip").forEach((chip) =>
   chip.addEventListener("click", () => { ui.sentence.value = chip.textContent; generate(); }));
 ui.settingsBtn.addEventListener("click", () => ui.settings.showModal());
-ui.saveKey.addEventListener("click", () => { saveSettings(); toast("Settings saved"); if (scene) maybeFetchBio(scene); });
+ui.saveKey.addEventListener("click", () => { saveSettings(); toast(ui.bioToggle.checked ? "Settings saved" : "Saved. Turn on “AI bio” to see bios"); });
 ui.clearKey.addEventListener("click", () => { ui.apiKey.value = ""; saveSettings(); toast("Key cleared"); });
+$("testKeyBtn").addEventListener("click", testGeminiKey);
+ui.settings.addEventListener("close", () => { saveSettings(); if (scene) maybeFetchBio(scene); }); // save even if closed with Esc
 
 /* Voice input: speak your sentence (Web Speech API: Chrome, Edge, Safari)
    Shows clear status and fixes for every failure case instead of failing

@@ -368,6 +368,10 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
 @keyframes bars { 50% { transform: scaleY(.45); } }
 .footer-note { margin: 0; font-size: 14px; color: rgba(255, 255, 235, .7); }
 
+/* ----- AI bio states ----- */
+.bio.bio-loading { opacity: .6; }
+.bio.bio-error { font-family: var(--sans); font-style: normal; font-size: 14px; color: #ffd6a0; }
+
 /* ----- settings dialog ----- */
 .settings {
   width: min(440px, calc(100% - 32px));
@@ -442,3 +446,7 @@ button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid 
   .preview-wrap { grid-row: auto; }
   .section-head { flex-direction: column; gap: 2px; }
 }
+
+.key-test { min-height: 1.4em; margin: 14px 0 0; font-size: 14px; color: var(--ink-70); }
+.key-test.good { color: var(--fathom); font-weight: 600; }
+.key-test.bad { color: var(--wine); }
